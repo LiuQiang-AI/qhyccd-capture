@@ -1,0 +1,14 @@
+name: qhyccd-capture
+display_name: qhyccd-capture
+visibility: public
+categories: ["Annotation", "Segmentation", "Acquisition"]
+contributions:
+  commands:
+    - id: qhyccd-capture.qhyccd_capture
+      python_name: qhyccd_capture.qhyccd_capture:CameraControlWidget
+      title: 单帧拍摄
+
+  widgets:
+    - command: qhyccd-capture.qhyccd_capture
+      display_name: qhyccd-capture
+
