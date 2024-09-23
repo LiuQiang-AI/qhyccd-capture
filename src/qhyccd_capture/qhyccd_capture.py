@@ -66,8 +66,6 @@ class CameraControlWidget(QWidget):
         self.last_update_time = None
         self.last_histogram_update_time = None
         self.is_recording = False
-        '''初始化相机资源'''
-        self.init_qhyccdResource()
 
         '''主布局设置'''
         # 创建一个滚动区域
@@ -81,14 +79,29 @@ class CameraControlWidget(QWidget):
         scroll_area.setWidget(scroll_content)
         
         
-        
         '''相机连接设置布局'''
         self.connect_box = QGroupBox('连接设置')
         start_setting_layout = QFormLayout()
     
+        self.qhyccd_path_label = QLabel()
+        self.qhyccd_path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.qhyccd_path_label.setWordWrap(True)  # 允许文本换行
+
+        self.select_qhyccd_path_button = QPushButton('SDK')
+        self.select_qhyccd_path_button.clicked.connect(self.select_qhyccd_path)
+
+        self.init_qhyccd_button = QPushButton('初始化')
+        self.init_qhyccd_button.clicked.connect(self.init_qhyccd_with_path)
+
+        # 创建水平布局
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(self.qhyccd_path_label)
+        h_layout.addWidget(self.select_qhyccd_path_button)
+        h_layout.addWidget(self.init_qhyccd_button)
+        
+        start_setting_layout.addRow(h_layout)
         # 相机选择
         self.camera_selector = QComboBox()
-        self.read_camera_name()
 
         start_setting_layout.addRow(QLabel('选择相机:'),self.camera_selector)
         
@@ -188,7 +201,6 @@ class CameraControlWidget(QWidget):
         # 将 start_setting_layout 包装在一个 QWidget 中
         self.connect_box.setLayout(start_setting_layout)
         layout.addWidget(self.connect_box)
-        
         
         
         '''相机配置设置布局'''
@@ -552,6 +564,11 @@ class CameraControlWidget(QWidget):
         self.CFW_control_box.setVisible(False)
         self.video_control_box.setVisible(False)
         
+        # 初始化SDK
+        self.connect_button.setEnabled(False)
+        self.disconnect_button.setEnabled(False)
+        self.reset_camera_button.setEnabled(False)
+        
         # 禁用复选框
         self.show_settings_checkbox.setEnabled(False)
         self.show_control_checkbox.setEnabled(False)
@@ -579,21 +596,69 @@ class CameraControlWidget(QWidget):
         self.viewer.mouse_double_click_callbacks.append(self.on_mouse_double_click)
         
         self.state_label.setText("初始化完成")
+        
+        '''初始化相机资源'''
+        try:
+            self.init_qhyccdResource()
+            self.read_camera_name()
+        except Exception as e:
+            self.qhyccd_path_label.setText(f"初始化失败: {str(e)}")
+            self.init_qhyccd_button.setEnabled(False)
+            
+        
+    
+    def init_qhyccd_with_path(self):
+        file_path = self.qhyccd_path_label.text()
+        self.init_qhyccdResource(file_path)
+    
+    def select_qhyccd_path(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择SDK文件", "", "DLL Files (*.dll);;SO Files (*.so)")
+        if file_path:
+            self.qhyccd_path_label.setText(file_path)
+            self.qhyccd_path = file_path
             
     # 初始化QHYCCD资源
-    def init_qhyccdResource(self):
-        # 根据操作系统加载相应的QHYCCD动态链接库
-        if self.system_name == 'posix':
-            # 类 Unix 系统（如 Linux 或 macOS）
-            self.qhyccddll = cdll.LoadLibrary('/usr/local/lib/libqhyccd.so')
-        elif self.system_name == 'nt':
-            # Windows 系统
-            self.qhyccddll = cdll.LoadLibrary('.\\qhyccd.dll')
+    def init_qhyccdResource(self,file_path=None):
+        
+        if file_path is None:
+            if self.system_name == 'posix':
+                # 类 Unix 系统（如 Linux 或 macOS）
+                lib_path = '/usr/local/lib/libqhyccd.so'
+                if os.path.exists(lib_path):
+                    self.qhyccddll = cdll.LoadLibrary(lib_path)
+                    self.qhyccd_path_label.setText(lib_path)
+                else:
+                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
+            elif self.system_name == 'nt':
+                # Windows 系统
+                import platform
+                arch = platform.architecture()[0]
+                if arch == '32bit':
+                    # X86 系统
+                    lib_path = 'C:\\Program Files\\QHYCCD\\AllInOne\\sdk\\x86\\qhyccd.dll'
+                elif arch == '64bit':
+                    # X64 系统
+                    lib_path = 'C:\\Program Files\\QHYCCD\\AllInOne\\sdk\\x64\\qhyccd.dll'
+                else:
+                    # 其他架构（不推荐使用）
+                    lib_path = './qhyccd.dll'
+                    warnings.warn(f"未知的架构 {arch}，请注意路径问题")
+                if os.path.exists(lib_path):
+                    self.qhyccddll = cdll.LoadLibrary(lib_path)
+                    self.qhyccd_path_label.setText(lib_path)
+                else:
+                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
+            else:
+                # 其他操作系统（不推荐使用）
+                lib_path = './qhyccd.dll'
+                if os.path.exists(lib_path):
+                    self.qhyccddll = cdll.LoadLibrary(lib_path)
+                    self.qhyccd_path_label.setText(lib_path)
+                else:
+                    warnings.warn(f"当操作系统是 {self.system_name}，请注意路径问题")
+                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
         else:
-            # 其他操作系统（不推荐使用）
-            self.qhyccddll = cdll.LoadLibrary('./qhyccd.dll')
-            warnings.warn(f"当操作系统是 {self.system_name}，请注意路径问题")
-            
+            self.qhyccddll = cdll.LoadLibrary(file_path)
         
         # 设置函数的参数和返回值类型
 
@@ -706,8 +771,13 @@ class CameraControlWidget(QWidget):
         ret = self.qhyccddll.InitQHYCCDResource()
          
         # self.read_camera_name()
+        
+        self.connect_button.setEnabled(True)
+        self.disconnect_button.setEnabled(True)
+        self.reset_camera_button.setEnabled(True)
 
         self.init_state = True
+        
         
 
     # 读取模式变化逻辑
@@ -841,6 +911,7 @@ class CameraControlWidget(QWidget):
             self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
                 
             self.state_label.setText("连接相机完成")
+    
     def disconnect_camera(self):
         """断开相机连接"""
         if self.camhandle == 0:
