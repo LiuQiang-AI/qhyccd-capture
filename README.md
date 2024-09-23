@@ -1,4 +1,4 @@
-# qhyccd-sdk
+# qhyccd-capture
 
 [![License BSD-3](https://img.shields.io/pypi/l/qhyccd-sdk.svg?color=green)](https://github.com//qhyccd-sdk/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/qhyccd-sdk.svg?color=green)](https://pypi.org/project/qhyccd-sdk)
