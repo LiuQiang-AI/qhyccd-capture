@@ -24,10 +24,16 @@
 
 你可以通过 [pip] 安装 `qhyccd-capture`：
 
-    pip install qhyccd-capture
+    conda create -n qhyccd-capture python=3.10
+    git clone https://github.com/nightliar-L/qhyccd-capture.git
+    cd qhyccd-capture
+    pip install -r requirements.txt
+    pip install -e .
 
+## 使用
 
-
+    conda activate qhyccd-capture
+    napari
 
 ## Contributing
 
