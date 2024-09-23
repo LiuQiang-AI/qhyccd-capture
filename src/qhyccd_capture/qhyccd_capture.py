@@ -1492,17 +1492,17 @@ class CameraControlWidget(QWidget):
             # 打印图像的形状和维度
             print(f"序列显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             if imgdata_np.ndim == 2:
-                imgdata_np = np.stack([imgdata_np] * 3, axis=-1)
-                imgdata_np = imgdata_np[np.newaxis, ...]
+                imgdata_np_3c = np.stack([imgdata_np] * 3, axis=-1)
+                imgdata_np_3c = imgdata_np_3c[np.newaxis, ...]
             if imgdata_np.ndim == 3:
                 # imgdata_np = imgdata_np.transpose(2,0,1)
-                imgdata_np = imgdata_np[np.newaxis, ...]
+                imgdata_np_3c = imgdata_np[np.newaxis, ...]
             # print(f"imgdata_np.ndim: {imgdata_np.ndim}")
-            if self.current_image is None or (imgdata_np.ndim != self.current_image.ndim and imgdata_np.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
-                self.current_image = imgdata_np
+            if self.current_image is None or (imgdata_np_3c.ndim != self.current_image.ndim and imgdata_np_3c.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
+                self.current_image = imgdata_np_3c
                 self.current_image_name = f'{camera_name}-sequence'
             else:
-                self.current_image = np.concatenate((self.current_image, imgdata_np), axis=0)
+                self.current_image = np.concatenate((self.current_image, imgdata_np_3c), axis=0)
                 self.current_image_name = f'{camera_name}-sequence'
             
             # 检查是否已经存在名为 'qhy-{camera_name}-sequence' 的图层
@@ -1511,7 +1511,7 @@ class CameraControlWidget(QWidget):
             else:
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
             
-            if self.camera_mode == "单帧模式":
+            if self.camera_mode == "单帧模式" and self.is_color_camera:
                 print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
