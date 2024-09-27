@@ -6,7 +6,7 @@ contributions:
   commands:
     - id: qhyccd-capture.qhyccd_capture
       python_name: qhyccd_capture.qhyccd_capture:CameraControlWidget
-      title: 单帧拍摄
+      title: capture
 
   widgets:
     - command: qhyccd-capture.qhyccd_capture

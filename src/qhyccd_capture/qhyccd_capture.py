@@ -1,20 +1,16 @@
 from PyQt5.QtWidgets import *
-'''(QWidget, QVBoxLayout, QPushButton, QLabel, QComboBox, QHBoxLayout, QGroupBox, QFormLayout, QSpinBox, QSlider, QCheckBox,QLineEdit)'''
-from PyQt5.QtCore import Qt,pyqtSlot, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt,pyqtSlot, QTimer
+from PyQt5.QtGui import QIcon,QTextCursor
 from napari_plugin_engine import napari_hook_implementation
-from napari.layers import Shapes
 import numpy as np
 import ctypes
 from ctypes import *
 import os
 import warnings
 from datetime import datetime
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import cv2
 import time
-from qtrangeslider import QRangeSlider
 from .control_id import CONTROL_ID
 from .previewThread import PreviewThread
 from .captureStatus import CaptureStatusThread
@@ -22,13 +18,30 @@ from .captureFrame import CaptureThread
 from .save_video import SaveThread
 from .histogramWidget import HistogramWidget
 from .memory_updated import MemoryMonitorThread
+from .setting import SettingsDialog
+from .language import translations
+from .camera_thread import CameraConnectionThread
 import queue
+import json
+import pickle
+from multiprocessing import Array
+from threading import Lock
 
 class CameraControlWidget(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
         
-        ''' 相机配置参数 '''
+        # 加载配置
+        self.settings_file = "settings.json"  # 设置文件路径
+        self.load_settings()  # 加载设置
+        
+        self.luts = {}
+        if os.path.exists('luts.pkl'):
+            with open('luts.pkl', 'rb') as f:
+                self.luts = pickle.load(f)
+        else:
+            self.create_luts([255, 65535], 0, 2.0, 1/100)
+        
         self.init_state = False
         self.camera_state = False
         
@@ -36,7 +49,6 @@ class CameraControlWidget(QWidget):
         
         self.viewer = napari_viewer
         self.contrast_limits_connection = None
-        # self.viewer.events.layers.connect(self.on_layer_selection_change)
         
         self.histogram_window = None  # 用于存储直方图窗口
 
@@ -56,18 +68,24 @@ class CameraControlWidget(QWidget):
         
         self.bin = [1,1]
         
+        self.image_x = 0
+        self.image_y = 0
         self.image_w = 0
         self.image_h = 0
         
         self.camera_ids = {}
         
         self.buffer_queue = queue.Queue()  # 用于保存图像数据的队列
+
         
         self.last_update_time = None
         self.last_histogram_update_time = None
         self.is_recording = False
-
-        '''主布局设置'''
+        
+        self.lock = Lock()
+        
+        self.camera_connection_thread = None
+        
         # 创建一个滚动区域
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -77,47 +95,52 @@ class CameraControlWidget(QWidget):
         layout = QVBoxLayout(scroll_content)
     
         scroll_area.setWidget(scroll_content)
-        
-        
-        '''相机连接设置布局'''
-        self.connect_box = QGroupBox('连接设置')
+
+        self.connect_box = QGroupBox(translations[self.language]['qhyccd_capture']['connect_settings'])
         start_setting_layout = QFormLayout()
-    
-        self.qhyccd_path_label = QLabel()
-        self.qhyccd_path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.qhyccd_path_label.setWordWrap(True)  # 允许文本换行
-
-        self.select_qhyccd_path_button = QPushButton('SDK')
-        self.select_qhyccd_path_button.clicked.connect(self.select_qhyccd_path)
-
-        self.init_qhyccd_button = QPushButton('初始化')
-        self.init_qhyccd_button.clicked.connect(self.init_qhyccd_with_path)
-
-        # 创建水平布局
-        h_layout = QHBoxLayout()
-        h_layout.addWidget(self.qhyccd_path_label)
-        h_layout.addWidget(self.select_qhyccd_path_button)
-        h_layout.addWidget(self.init_qhyccd_button)
         
+        # 设置设置按钮
+        # 创建一个水平布局
+        h_layout = QHBoxLayout()
+        
+        self.settings_dialog = SettingsDialog(self)
+        self.settings_button = QPushButton(translations[self.language]['qhyccd_capture']['settings'])
+        self.settings_button.clicked.connect(self.show_settings_dialog)
+        
+        self.state_label = QTextEdit()
+        self.state_label.setReadOnly(True)
+        self.state_label.setLineWrapMode(QTextEdit.NoWrap)
+        self.state_label.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # 禁用水平滚动条
+        self.state_label.setFixedHeight(self.state_label.fontMetrics().height() + 10)  # 设置固定高度为一行文本的高度加上一些边距
+        self.state_label.setStyleSheet("""
+            QScrollBar:vertical { width: 2px; }
+        """)  # 设置垂直滚动条的宽度为2像素
+        
+        # 将控件添加到水平布局中
+        h_layout.addWidget(QLabel(translations[self.language]['qhyccd_capture']['status']))
+        h_layout.addWidget(self.state_label)
+        h_layout.addWidget(self.settings_button)
+        
+        # 将水平布局添加到表单布局中
         start_setting_layout.addRow(h_layout)
         # 相机选择
         self.camera_selector = QComboBox()
 
-        start_setting_layout.addRow(QLabel('选择相机:'),self.camera_selector)
+        start_setting_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['select_camera']),self.camera_selector)
         
         # 相机模式选择
-        self.camera_mode = '单帧模式'
-        self.camera_mode_ids = {'单帧模式':0,'连续模式':1}
+        self.camera_mode = translations[self.language]['qhyccd_capture']['single_frame_mode']
+        self.camera_mode_ids = {translations[self.language]['qhyccd_capture']['single_frame_mode']:0,translations[self.language]['qhyccd_capture']['continuous_mode']:1}
         self.camera_mode_selector = QComboBox()
         self.camera_mode_selector.addItems(list(self.camera_mode_ids.keys()))
         self.camera_mode_selector.currentIndexChanged.connect(self.on_camera_mode_changed)
-        start_setting_layout.addRow(QLabel('选择相机模式:'),self.camera_mode_selector)
+        start_setting_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['select_camera_mode']),self.camera_mode_selector)
         
         # 连接和断开按钮
         grid_layout = QGridLayout()
-        self.connect_button = QPushButton('连接')
-        self.disconnect_button = QPushButton('断开')
-        self.reset_camera_button = QPushButton('重新扫描相机')
+        self.connect_button = QPushButton(translations[self.language]['qhyccd_capture']['connect'])
+        self.disconnect_button = QPushButton(translations[self.language]['qhyccd_capture']['disconnect'])
+        self.reset_camera_button = QPushButton(translations[self.language]['qhyccd_capture']['reset_camera'])
         
         self.connect_button.clicked.connect(self.connect_camera)
         self.disconnect_button.clicked.connect(self.disconnect_camera)
@@ -129,15 +152,15 @@ class CameraControlWidget(QWidget):
         start_setting_layout.addRow(grid_layout)
         grid_layout = QGridLayout()
         # 相机配置显示
-        self.config_label = QLabel('未连接')
+        self.config_label = QLabel(translations[self.language]['qhyccd_capture']['not_connected'])
         self.config_label.setStyleSheet("color: red;")  # 设置字体颜色为红色
         grid_layout.addWidget(self.config_label,0,0)
         
-        self.fps_label = QLabel('FPS: ~')
+        self.fps_label = QLabel(translations[self.language]['qhyccd_capture']['fps'])
         self.fps_label.setVisible(False)
         grid_layout.addWidget(self.fps_label,0,1)
         
-        self.memory_label = QLabel('内存:')
+        self.memory_label = QLabel(translations[self.language]['qhyccd_capture']['memory'])
         grid_layout.addWidget(self.memory_label,0,2)
         
         self.memory_progress_bar = QProgressBar(self)  # 创建进度条控件
@@ -146,9 +169,6 @@ class CameraControlWidget(QWidget):
         
         grid_layout.addWidget(self.memory_progress_bar,0,3)
         start_setting_layout.addRow(grid_layout)
-        
-        self.state_label = QLabel()
-        start_setting_layout.addRow(QLabel("状态:"),self.state_label)
         
         # 内存监控
         self.memory_monitor_thread = MemoryMonitorThread()
@@ -160,27 +180,27 @@ class CameraControlWidget(QWidget):
         
         self.show_settings_checkbox = QPushButton()
         self.show_settings_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/camera_icon.png'))  # 设置图标路径
-        self.show_settings_checkbox.setToolTip('显示相机设置')  # 设置提示文本
+        self.show_settings_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_camera_settings'])  # 设置提示文本
 
         self.show_control_checkbox = QPushButton()
         self.show_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/instagram_icon.png'))  # 设置图标路径
-        self.show_control_checkbox.setToolTip('显示拍摄控制')
+        self.show_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_capture_control'])
 
         self.show_image_control_checkbox = QPushButton()
         self.show_image_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/film_icon.png'))  # 设置图标路径
-        self.show_image_control_checkbox.setToolTip('显示图像控制')
+        self.show_image_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_image_control'])
 
         self.show_temperature_control_checkbox = QPushButton()
         self.show_temperature_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/thermometer_icon.png'))  # 设置图标路径
-        self.show_temperature_control_checkbox.setToolTip('显示温度控制')
+        self.show_temperature_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_temperature_control'])
 
         self.show_CFW_control_checkbox = QPushButton()
         self.show_CFW_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/toggle_right_icon.png'))  # 设置图标路径
-        self.show_CFW_control_checkbox.setToolTip('显示滤镜轮控制')
+        self.show_CFW_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_cfw_control'])
 
         self.show_video_control_checkbox = QPushButton()
         self.show_video_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/video_icon.png'))  # 设置图标路径
-        self.show_video_control_checkbox.setToolTip('显示录像控制')
+        self.show_video_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_video_control'])
         
         self.show_settings_checkbox.clicked.connect(lambda: self.toggle_settings_box())
         self.show_control_checkbox.clicked.connect(lambda: self.toggle_control_box())
@@ -188,7 +208,6 @@ class CameraControlWidget(QWidget):
         self.show_temperature_control_checkbox.clicked.connect(lambda: self.toggle_temperature_control_box())
         self.show_CFW_control_checkbox.clicked.connect(lambda: self.toggle_CFW_control_box())
         self.show_video_control_checkbox.clicked.connect(lambda: self.toggle_video_control_box())
-        
         
         grid_layout.addWidget(self.show_settings_checkbox,1,0)
         grid_layout.addWidget(self.show_control_checkbox,1,1)
@@ -198,13 +217,17 @@ class CameraControlWidget(QWidget):
         grid_layout.addWidget(self.show_CFW_control_checkbox,1,5)
         start_setting_layout.addRow(grid_layout)
         
+        # 创建一个垂直方向的 spacer
+        spacer = QSpacerItem(20, 2, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        # 将 spacer 添加到布局的底部
+        start_setting_layout.addItem(spacer)
+        
         # 将 start_setting_layout 包装在一个 QWidget 中
         self.connect_box.setLayout(start_setting_layout)
         layout.addWidget(self.connect_box)
         
-        
-        '''相机配置设置布局'''
-        self.settings_box = QGroupBox('相机设置')
+        self.settings_box = QGroupBox(translations[self.language]['qhyccd_capture']['camera_settings'])
         settings_layout = QFormLayout()
 
         # 读出模式选择框
@@ -212,22 +235,30 @@ class CameraControlWidget(QWidget):
         self.readout_mode_selector = QComboBox()
         self.readout_mode_selector.addItems(list(self.camera_read_mode_ids.keys()))  # 示例项
         self.readout_mode_selector.currentIndexChanged.connect(self.on_readout_mode_changed)
-        settings_layout.addRow(QLabel('读出模式:'), self.readout_mode_selector)
+        settings_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['readout_mode']), self.readout_mode_selector)
 
         # 像素合并Bin选择框
         self.camera_pixel_bin = {'1*1':[1,1],'2*2':[2,2],'3*3':[3,3],'4*4':[4,4]}
         self.pixel_bin_selector = QComboBox()
         self.pixel_bin_selector.addItems(list(self.camera_pixel_bin.keys()))  # 示例项
         self.pixel_bin_selector.currentIndexChanged.connect(self.on_pixel_bin_changed)
-        settings_layout.addRow(QLabel('像素合并 Bin:'), self.pixel_bin_selector)
+        settings_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['pixel_bin']), self.pixel_bin_selector)
 
         # 图像位深度选择框
         self.camera_depth_options = {}
         self.depth_selector = QComboBox()  # 创建图像位深度选择框
         self.depth_selector.addItems(list(self.camera_depth_options.keys()))  
         self.depth_selector.currentIndexChanged.connect(self.on_depth_changed)
-        self.depth_name = QLabel("图像位深度:")
+        self.depth_name = QLabel(translations[self.language]['qhyccd_capture']['image_depth'])
         settings_layout.addRow(self.depth_name, self.depth_selector)
+        
+        self.camera_Debayer_mode = {translations[self.language]['qhyccd_capture']['debayer_mode_true']:True,translations[self.language]['qhyccd_capture']['debayer_mode_false']:False}
+        self.Debayer_mode = False
+        self.Debayer_mode_selector = QComboBox()
+        self.Debayer_mode_selector.addItems(list(self.camera_Debayer_mode.keys()))
+        self.Debayer_mode_selector.currentIndexChanged.connect(self.on_Debayer_mode_changed)
+        self.Debayer_mode_label = QLabel(translations[self.language]['qhyccd_capture']['debayer_mode'])
+        settings_layout.addRow(self.Debayer_mode_label, self.Debayer_mode_selector)
         
         # 分辨率选择框
         # 变量定义
@@ -235,21 +266,21 @@ class CameraControlWidget(QWidget):
         self.y = QSpinBox()
         self.w = QSpinBox()
         self.h = QSpinBox()
-        self.set_resolution_button = QPushButton('设置分辨率')
-        self.set_original_resolution_button = QPushButton('还原')
-        self.set_original_resolution_button.setToolTip('还原为相机初始分辨率')
-        self.show_roi_button = QPushButton('ROI')
-        self.show_roi_button.setToolTip('ROI (鼠标第一次点击确定起始点，第二次点击确定终止点)')
+        self.set_resolution_button = QPushButton(translations[self.language]['qhyccd_capture']['set_resolution'])
+        self.set_original_resolution_button = QPushButton(translations[self.language]['qhyccd_capture']['reset_resolution'])
+        self.set_original_resolution_button.setToolTip(translations[self.language]['qhyccd_capture']['reset_resolution_tooltip'])
+        self.show_roi_button = QPushButton(translations[self.language]['qhyccd_capture']['roi'])
+        self.show_roi_button.setToolTip(translations[self.language]['qhyccd_capture']['roi_tooltip'])
 
         # 布局设置
         grid_layout = QGridLayout()
-        grid_layout.addWidget(QLabel('x:'),0,0)
+        grid_layout.addWidget(QLabel(translations[self.language]['qhyccd_capture']['x']),0,0)
         grid_layout.addWidget(self.x,0,1)
-        grid_layout.addWidget(QLabel('y:'),0,2)
+        grid_layout.addWidget(QLabel(translations[self.language]['qhyccd_capture']['y']),0,2)
         grid_layout.addWidget(self.y,0,3)
-        grid_layout.addWidget(QLabel('w:'),1,0)
+        grid_layout.addWidget(QLabel(translations[self.language]['qhyccd_capture']['w']),1,0)
         grid_layout.addWidget(self.w,1,1)
-        grid_layout.addWidget(QLabel('h:'),1,2)
+        grid_layout.addWidget(QLabel(translations[self.language]['qhyccd_capture']['h']),1,2)
         grid_layout.addWidget(self.h,1,3)
         
         # 创建一个QWidget容器来放置Grid布局
@@ -280,56 +311,53 @@ class CameraControlWidget(QWidget):
         # 主布局
         layout.addWidget(self.settings_box)
         
-
-
-        '''拍摄控制设置布局'''
-        self.control_box = QGroupBox('拍摄控制')
+        self.control_box = QGroupBox(translations[self.language]['qhyccd_capture']['capture_control'])
         control_layout = QFormLayout()
         
         self.exposure_time = QDoubleSpinBox()  # 修改为 QDoubleSpinBox
         self.exposure_time.setSuffix(' ms')  # 设置单位为毫秒
         self.exposure_time.setDecimals(3)  # 保留三位小数
         self.exposure_time.valueChanged.connect(self.update_exposure_time)
-        control_layout.addRow(QLabel('曝光时间:'), self.exposure_time)
+        control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['exposure_time']), self.exposure_time)
         
         # 增益设置
         self.gain = QDoubleSpinBox()
         self.gain.setSuffix(' dB')
         self.gain.valueChanged.connect(self.update_gain)
-        control_layout.addRow(QLabel('增益:'), self.gain)
+        control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['gain']), self.gain)
 
         # 偏移量设置
         self.offset = QDoubleSpinBox()
         self.offset.setSuffix(' units')
         self.offset.valueChanged.connect(self.update_offset)
-        control_layout.addRow(QLabel('偏移量:'), self.offset)
+        control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['offset']), self.offset)
 
         # USB 传输设置
         self.usb_traffic = QSpinBox()
         self.usb_traffic.setSuffix(' MB/s')
         self.usb_traffic.setRange(1, 500)  # 设置 USB 输范围
         self.usb_traffic.valueChanged.connect(self.update_usb_traffic)
-        control_layout.addRow(QLabel('USB 宽带:'), self.usb_traffic)
+        control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['usb_traffic']), self.usb_traffic)
         
         # 添加图像显示方式选择框
         self.display_mode_selector = QComboBox()
-        self.display_mode_selector.addItems(['分布式显示', '单一显示', '序列显示'])
+        self.display_mode_selector.addItems([translations[self.language]['qhyccd_capture']['distributed_display'], translations[self.language]['qhyccd_capture']['single_display'], translations[self.language]['qhyccd_capture']['sequential_display']])
         
-        control_layout.addRow(QLabel('图像显示方式:'), self.display_mode_selector)
+        control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['display_mode']), self.display_mode_selector)
 
         # 添加 Bayer 类型转换组件
         self.bayer_conversion_selector = QComboBox()
         self.bayer_conversion_selector.addItems(["None", "RGGB", "BGGR", "GRBG", "GBRG"])
         self.bayer_conversion_selector.currentIndexChanged.connect(self.on_bayer_conversion_changed)
         self.bayer_conversion = "None"
-        self.bayer_name = QLabel("Bayer 类型转换:")
+        self.bayer_name = QLabel(translations[self.language]['qhyccd_capture']['bayer_conversion'])
         # 将 Bayer 类型转换组件添加到布局中
         control_layout.addRow(self.bayer_name, self.bayer_conversion_selector)
         
         grid_layout = QGridLayout()
-        self.start_button = QPushButton('开始拍摄')
-        self.save_button = QPushButton('保存')
-        self.save_button.setToolTip('保存最后拍摄的未经过图像处理的图像')
+        self.start_button = QPushButton(translations[self.language]['qhyccd_capture']['start_capture'])
+        self.save_button = QPushButton(translations[self.language]['qhyccd_capture']['save'])
+        self.save_button.setToolTip(translations[self.language]['qhyccd_capture']['save_tooltip'])
         self.start_button.clicked.connect(self.start_capture)
         self.save_button.clicked.connect(self.save_image)
         grid_layout.addWidget(self.start_button,0,0)
@@ -345,24 +373,23 @@ class CameraControlWidget(QWidget):
         self.control_box.setLayout(control_layout)
         layout.addWidget(self.control_box)
 
-        '''录像设置布局'''
         self.preview_thread = None
         
         # 录像区域
-        self.video_control_box = QGroupBox('录像')
+        self.video_control_box = QGroupBox(translations[self.language]['qhyccd_capture']['recording'])
         video_layout = QFormLayout()
         
         grid_layout = QGridLayout()
         # 预览模式控件
         self.preview_status = False
-        self.preview_checkbox = QCheckBox('启动预览模式')
-        self.preview_checkbox.setToolTip('预览模式下，相机将实时输出图像数据，并显示在窗口中')
+        self.preview_checkbox = QCheckBox(translations[self.language]['qhyccd_capture']['preview_mode'])
+        self.preview_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['preview_mode_tooltip'])
         self.preview_checkbox.stateChanged.connect(self.toggle_preview_mode)
         grid_layout.addWidget(self.preview_checkbox,0,0)
         # 是否顶置的控件
         # self.top_checkbox_status = False
-        self.top_checkbox = QCheckBox('是否顶置')
-        self.top_checkbox.setToolTip('勾选后，图像将顶置显示')
+        self.top_checkbox = QCheckBox(translations[self.language]['qhyccd_capture']['top_checkbox'])
+        self.top_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['top_checkbox_tooltip'])
         # self.top_checkbox.stateChanged.connect(self.toggle_top_checkbox)
         grid_layout.addWidget(self.top_checkbox,0,1)
         # 创建水平布局，将两个复选框放在左边
@@ -382,53 +409,53 @@ class CameraControlWidget(QWidget):
         self.save_thread = None
         
         # 保存方式选择框
-        self.save_mode = '单帧存储'
+        self.save_mode = translations[self.language]['qhyccd_capture']['single_frame_storage']
         self.save_mode_selector = QComboBox()
-        self.save_mode_selector.addItems(['单帧存储', '视频存储'])
+        self.save_mode_selector.addItems([translations[self.language]['qhyccd_capture']['single_frame_storage'], translations[self.language]['qhyccd_capture']['video_storage']])
         self.save_mode_selector.currentIndexChanged.connect(self.on_save_mode_changed)
-        # 添加到布局中
-        video_layout.addRow(QLabel('保存方式:'), self.save_mode_selector)
+        # 添加到布局中1chin
+        video_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['save_mode']), self.save_mode_selector)
         
         # 路径选择控件
         self.path_selector = QLineEdit()
         self.path_selector.setText(self.default_path)
-        self.path_button = QPushButton('选择路径')
+        self.path_button = QPushButton(translations[self.language]['qhyccd_capture']['select_path'])
         self.path_button.clicked.connect(self.select_path)
         path_layout = QHBoxLayout()
         path_layout.addWidget(self.path_selector)
         path_layout.addWidget(self.path_button)
-        video_layout.addRow(QLabel('录像路径:'), path_layout)
+        video_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['record_path']), path_layout)
         
         # 录像文件名选择控件
         self.record_file_name = QLineEdit()
-        self.record_file_name.setPlaceholderText("请输入录像文件名")
+        self.record_file_name.setPlaceholderText(translations[self.language]['qhyccd_capture']['record_file_name'])
         self.record_file_name.setText(self.default_filename)
         
         # 添加保存格式选择控件
         self.save_format_selector = QComboBox()
-        if self.save_mode == '单帧存储':
+        if self.save_mode == translations[self.language]['qhyccd_capture']['single_frame_storage']:
             self.save_format_selector.addItems(['png', 'jpeg', 'tiff', 'fits'])  # 图片格式
-        elif self.save_mode == '视频存储':
+        elif self.save_mode == translations[self.language]['qhyccd_capture']['video_storage']:
             self.save_format_selector.addItems(['avi', 'mp4', 'mkv'])  # 视频格式
         name_layout = QHBoxLayout()
         name_layout.addWidget(self.record_file_name)
         name_layout.addWidget(self.save_format_selector)
-        video_layout.addRow(QLabel('录像文件名:'), name_layout)   
+        video_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['record_file_name']), name_layout)   
         
         # 录像模式选择控件
-        self.record_mode = '连续模式'
-        self.record_mode_ids = {"连续模式":0,'时间模式':1,'帧数模式':2}
+        self.record_mode = translations[self.language]['qhyccd_capture']['continuous_mode']
+        self.record_mode_ids = {translations[self.language]['qhyccd_capture']['continuous_mode']:0,translations[self.language]['qhyccd_capture']['time_mode']:1,translations[self.language]['qhyccd_capture']['frame_mode']:2}
         self.record_mode_selector = QComboBox()
         self.record_mode_selector.addItems(list(self.record_mode_ids.keys()))
         self.record_mode_selector.currentIndexChanged.connect(self.on_record_mode_changed)
-        video_layout.addRow(QLabel('录像模式:'), self.record_mode_selector)
+        video_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['record_mode']), self.record_mode_selector)
         
         # 显示时间输入框
         self.start_save_time = None
         self.record_time_input = QSpinBox()
-        self.record_time_input.setSuffix(' 秒')
+        self.record_time_input.setSuffix(translations[self.language]['qhyccd_capture']['seconds'])
         self.record_time_input.setRange(1, 3600)  # 设置范围为1秒到3600秒
-        self.record_time_input_label = QLabel('录制时长:')
+        self.record_time_input_label = QLabel(translations[self.language]['qhyccd_capture']['record_time'])
         video_layout.addRow(self.record_time_input_label, self.record_time_input)
         self.record_time_input.setVisible(False)
         self.record_time_input_label.setVisible(False)
@@ -437,19 +464,19 @@ class CameraControlWidget(QWidget):
         self.record_frame_count = 0
         self.frame_count_input = QSpinBox()
         self.frame_count_input.setRange(1, 10000)  # 设置范围为1到10000帧
-        self.frame_count_input_label = QLabel('录制帧数:')
+        self.frame_count_input_label = QLabel(translations[self.language]['qhyccd_capture']['record_frames'])
         video_layout.addRow(self.frame_count_input_label, self.frame_count_input)
         self.frame_count_input.setVisible(False)
         self.frame_count_input_label.setVisible(False)
 
         grid_layout = QGridLayout()
         # 开启录像按钮
-        self.record_button = QPushButton('开始录像')
+        self.record_button = QPushButton(translations[self.language]['qhyccd_capture']['start_record'])
         grid_layout.addWidget(self.record_button,0,0)
         self.record_button.clicked.connect(self.start_recording)
         
         # 停止录像按钮
-        self.stop_record_button = QPushButton('停止录像')
+        self.stop_record_button = QPushButton(translations[self.language]['qhyccd_capture']['stop_record'])
         self.stop_record_button.clicked.connect(self.stop_recording)
         grid_layout.addWidget(self.stop_record_button,0,1)
         video_layout.addRow(grid_layout)
@@ -459,29 +486,28 @@ class CameraControlWidget(QWidget):
         self.progress_bar.setRange(0, 100)  # 设置进度条范围
         self.progress_bar.setValue(0)  # 初始值为0
         # 将进度条添加到布局中
-        video_layout.addRow(QLabel('录制进度:'), self.progress_bar)
+        video_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['record_progress']), self.progress_bar)
         
         self.video_control_box.setLayout(video_layout)
         layout.addWidget(self.video_control_box)
         
-
-
         # '''图像处理设置布局'''
         # # 图像控制区域
-        self.image_control_box = QGroupBox('图像处理')
+        self.image_control_box = QGroupBox(translations[self.language]['qhyccd_capture']['image_processing'])
         image_control_layout = QVBoxLayout()
         
         # 添加直方图控制
-        histogram_group = QGroupBox("直方图")
+        histogram_group = QGroupBox(translations[self.language]['qhyccd_capture']['histogram'])
         histogram_layout = QFormLayout()
         
         # 添加是否显示直方图的复选框
-        self.show_histogram_checkbox = QCheckBox("显示直方图")
+        self.show_histogram_checkbox = QCheckBox(translations[self.language]['qhyccd_capture']['show_histogram'])
         self.show_histogram_checkbox.stateChanged.connect(self.toggle_histogram_display)
         histogram_layout.addRow(self.show_histogram_checkbox)
         
         # 添加绘图区域
-        self.histogram_widget = HistogramWidget(self.viewer)
+        self.img_buffer = queue.Queue()
+        self.histogram_widget = HistogramWidget(self.viewer,self.img_buffer,self.language)
 
         self.last_time = 0  # 初始化上次更新时间
         self.update_interval = 1   # 每秒 1 次更新的时间间隔
@@ -490,18 +516,16 @@ class CameraControlWidget(QWidget):
         
         histogram_group.setLayout(histogram_layout)
         
-
-        
         # 添加白平衡控制
-        self.wb_group = QGroupBox("白平衡控制")
+        self.wb_group = QGroupBox(translations[self.language]['qhyccd_capture']['white_balance_control'])
         wb_layout = QFormLayout()
         self.wb_red = QSlider(Qt.Horizontal)
         self.wb_green = QSlider(Qt.Horizontal)
         self.wb_blue = QSlider(Qt.Horizontal)
         
-        wb_layout.addRow(QLabel("红色:"), self.wb_red)
-        wb_layout.addRow(QLabel("绿:"), self.wb_green)
-        wb_layout.addRow(QLabel("蓝色:"), self.wb_blue)
+        wb_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['red']), self.wb_red)
+        wb_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['green']), self.wb_green)
+        wb_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['blue']), self.wb_blue)
         self.wb_group.setLayout(wb_layout)
         
         # 将新的布局添加到主布局中
@@ -514,17 +538,17 @@ class CameraControlWidget(QWidget):
 
         '''温度控制布局'''
         # 温度控制
-        self.temperature_control_box = QGroupBox('温度控制')
+        self.temperature_control_box = QGroupBox(translations[self.language]['qhyccd_capture']['temperature_control'])
         temperature_layout = QFormLayout()
         
         self.temperature_setpoint = QDoubleSpinBox()
         self.temperature_setpoint.setSuffix(' °C')
         self.temperature_setpoint.valueChanged.connect(self.update_temperature_setpoint)
-        temperature_layout.addRow(QLabel('设定温度:'), self.temperature_setpoint)
+        temperature_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['set_temperature']), self.temperature_setpoint)
         
         grid_layout = QGridLayout()
-        self.current_temperature_label = QLabel('温度: 未知')
-        self.current_humidity_label = QLabel('湿度: 未知')
+        self.current_temperature_label = QLabel(translations[self.language]['qhyccd_capture']['temperature'])
+        self.current_humidity_label = QLabel(translations[self.language]['qhyccd_capture']['humidity'])
         grid_layout.addWidget(self.current_temperature_label,0,0)
         grid_layout.addWidget(self.current_humidity_label,0,1)
         temperature_layout.addRow(grid_layout)
@@ -532,10 +556,9 @@ class CameraControlWidget(QWidget):
         self.temperature_control_box.setLayout(temperature_layout)
         layout.addWidget(self.temperature_control_box)
         
-
         '''滤镜轮控制布局'''
         # 滤镜轮控制区域
-        self.CFW_control_box = QGroupBox('滤镜轮控制')
+        self.CFW_control_box = QGroupBox(translations[self.language]['qhyccd_capture']['CFW_control'])
         CFW_layout = QFormLayout()
         
         self.CFW_id = None # 当前选中滤镜轮ID
@@ -545,16 +568,19 @@ class CameraControlWidget(QWidget):
         self.CFW_filter_selector.addItems(list(self.CFW_number_ids.keys()))  # 示例项
         self.CFW_filter_selector.currentIndexChanged.connect(self.on_CFW_filter_changed)
         
-        CFW_layout.addRow(QLabel('滤镜轮位置:'), self.CFW_filter_selector)
+        CFW_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['CFW_position']), self.CFW_filter_selector)
         self.CFW_control_box.setLayout(CFW_layout)
         layout.addWidget(self.CFW_control_box)
 
+        # 创建一个垂直方向的 spacer
+        spacer = QSpacerItem(20, 2, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
+        # 将 spacer 添加到布局的底部
+        layout.addItem(spacer)
 
         '''主布局'''
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
-        
         
         '''初始化所有区域为隐藏状态'''
         self.settings_box.setVisible(False)
@@ -595,27 +621,40 @@ class CameraControlWidget(QWidget):
         self.viewer.mouse_drag_callbacks.append(self.on_mouse_click)
         self.viewer.mouse_double_click_callbacks.append(self.on_mouse_double_click)
         
-        self.state_label.setText("初始化完成")
+        self.append_text(translations[self.language]['qhyccd_capture']['init_complete'])
         
         '''初始化相机资源'''
         try:
-            self.init_qhyccdResource()
+            if self.settings_dialog.qhyccd_path_label.text() is None or self.settings_dialog.qhyccd_path_label.text() == "" or self.settings_dialog.qhyccd_path_label.text() == " ":
+                self.init_qhyccdResource()
+            else:
+                self.init_qhyccdResource(self.settings_dialog.qhyccd_path_label.text())
             self.read_camera_name()
         except Exception as e:
-            self.qhyccd_path_label.setText(f"初始化失败: {str(e)}")
-            self.init_qhyccd_button.setEnabled(False)
-            
+            print(f"{translations[self.language]['debug']['init_failed']}: {str(e)}")
+            self.append_text(translations[self.language]['qhyccd_capture']['init_failed'])
+
+    def append_text(self, text):
+        # 向 QTextEdit 添加文本
+        self.state_label.append(text)
+        # # 自动滚动到底部
+
+        self.state_label.moveCursor(QTextCursor.End)
+        self.state_label.moveCursor(QTextCursor.StartOfLine) # 滚动到最左边
+    
+    def show_settings_dialog(self):
+        self.settings_dialog.exec_()
         
-    
-    def init_qhyccd_with_path(self):
-        file_path = self.qhyccd_path_label.text()
-        self.init_qhyccdResource(file_path)
-    
-    def select_qhyccd_path(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择SDK文件", "", "DLL Files (*.dll);;SO Files (*.so)")
-        if file_path:
-            self.qhyccd_path_label.setText(file_path)
-            self.qhyccd_path = file_path
+    def load_settings(self):
+        if os.path.exists(self.settings_file):
+            with open(self.settings_file, 'r') as f:
+                settings = json.load(f)
+                self.qhyccd_path = settings.get("qhyccd_path", "")
+                self.language = settings.get("language", "zh")
+        else:
+            self.qhyccd_path = ""
+            self.language = "zh"  # 默认语言
+        # self.append_text(translations[self.language]['qhyccd_capture']['settings_loaded'])
             
     # 初始化QHYCCD资源
     def init_qhyccdResource(self,file_path=None):
@@ -626,9 +665,8 @@ class CameraControlWidget(QWidget):
                 lib_path = '/usr/local/lib/libqhyccd.so'
                 if os.path.exists(lib_path):
                     self.qhyccddll = cdll.LoadLibrary(lib_path)
-                    self.qhyccd_path_label.setText(lib_path)
                 else:
-                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} 不存在")
             elif self.system_name == 'nt':
                 # Windows 系统
                 import platform
@@ -640,27 +678,24 @@ class CameraControlWidget(QWidget):
                     # X64 系统
                     lib_path = 'C:\\Program Files\\QHYCCD\\AllInOne\\sdk\\x64\\qhyccd.dll'
                 else:
-                    # 其他架构（不推荐使用）
-                    lib_path = './qhyccd.dll'
-                    warnings.warn(f"未知的架构 {arch}，请注意路径问题")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['unknown_architecture']}: {arch}")
                 if os.path.exists(lib_path):
                     self.qhyccddll = cdll.LoadLibrary(lib_path)
-                    self.qhyccd_path_label.setText(lib_path)
                 else:
-                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} 不存在")
             else:
                 # 其他操作系统（不推荐使用）
-                lib_path = './qhyccd.dll'
+                lib_path = '/usr/local/lib/libqhyccd.so'
                 if os.path.exists(lib_path):
                     self.qhyccddll = cdll.LoadLibrary(lib_path)
-                    self.qhyccd_path_label.setText(lib_path)
                 else:
-                    warnings.warn(f"当操作系统是 {self.system_name}，请注意路径问题")
-                    raise FileNotFoundError(f"文件 {lib_path} 不存在")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} 不存在")
+            # 设置函数的参数和返回值类型
+            self.settings_dialog.qhyccd_path_label.setText(lib_path)
         else:
             self.qhyccddll = cdll.LoadLibrary(file_path)
+
         
-        # 设置函数的参数和返回值类型
 
         # 获取机 ID
         self.qhyccddll.GetQHYCCDId.argtypes = [ctypes.c_uint32, ctypes.c_char_p]
@@ -778,15 +813,14 @@ class CameraControlWidget(QWidget):
 
         self.init_state = True
         
-        
-
     # 读取模式变化逻辑
     def on_camera_mode_changed(self):
         self.camera_mode = self.camera_mode_selector.currentText()
-        print(f"self.camera_mode:{self.camera_mode}")
+        # print(f"self.camera_mode:{self.camera_mode}")
         if self.camhandle != 0 or self.camera_state:
             self.disconnect_camera()
             self.connect_camera()
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_mode"]}')
 
     # 创建一个方法来更新进度条
     def update_memory_progress(self, used_memory):
@@ -813,132 +847,101 @@ class CameraControlWidget(QWidget):
         self.init_qhyccdResource()
         # 扫描QHYCCD相机
         num = self.qhyccddll.ScanQHYCCD()
-        print("ScanQHYCCD() num =", num)
+        # print("ScanQHYCCD() num =", num)
         self.camera_ids = {}
         # 遍历所有扫描到的相机
         for index in range(num):
-            print("index =", index)
+            # print("index =", index)
 
             # 获相机 ID
             id_buffer = ctypes.create_string_buffer(40)
             ret = self.qhyccddll.GetQHYCCDId(index, id_buffer)
+            if ret != 0:
+                warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_id_failed']}: {ret}")
             result_id = id_buffer.value.decode("utf-8")
             self.camera_ids[result_id] = id_buffer
-            print(f"id_buffer:{id_buffer},{type(id_buffer)},self.camera_ids[result_id]:{self.camera_ids[result_id]},{type(self.camera_ids[result_id])}")
-            print("GetQHYCCDId() ret =", ret, "id =", result_id)
-    
         self.camera_selector.clear()
         self.camera_selector.addItems(list(self.camera_ids.keys()))
-    
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_name"]}')
     # 连接相机
-    def connect_camera(self,mode=0,bin=[1,1]):
+    def connect_camera(self,mode=0):
+        self.connect_button.setEnabled(False)
+        start_time = time.time()
         if self.camhandle != 0:
             self.disconnect_camera()
         if not self.init_state:
             self.init_qhyccdResource()
         camera_name = self.camera_selector.currentText()
         self.camera_name = camera_name
-        print(f"self.camera_ids[camera_name]:{self.camera_ids[camera_name]},{type(self.camera_ids[camera_name])}")
         
-        self.camhandle = self.qhyccddll.OpenQHYCCD(self.camera_ids[camera_name])
-        print("OpenQHYCCD() camhandle =", hex(self.camhandle))
-
-        # 如果相机句柄不为0，表示相机打开成功
-        if self.camhandle != 0 and self.camhandle > 0:
-            # 获取相机的读取模式数量
-            readmodenum = ctypes.c_uint32()
-            ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(self.camhandle, byref(readmodenum))
-            print("GetQHYCCDNumberOfReadModes() ret =", ret, "num =", readmodenum.value)
-
-            self.camera_read_mode_ids.clear()
-            # 遍历所有的读取模式
-            for index in range(readmodenum.value):
-                print("index =", index)
-
-                # 获取每种读取模式的名称
-                name_buffer = ctypes.create_string_buffer(40)
-                ret = self.qhyccddll.GetQHYCCDReadModeName(self.camhandle, index, name_buffer)
-                result_name = name_buffer.value.decode("utf-8")
-                print("GetQHYCCDReadModeName() ret =", ret, "name =", result_name)
-                
-                self.camera_read_mode_ids[f"{result_name}"] = index
-
-            if mode == 0:
-                # 设置相机为第一个读取模式 (index 0)
-                ret = self.qhyccddll.SetQHYCCDReadMode(self.camhandle, 0)
-            else:
-                self.camera_read_mode_ids = self.swap_elements(self.camera_read_mode_ids,mode)
-                ret = self.qhyccddll.SetQHYCCDReadMode(self.camhandle, self.camera_read_mode_ids[mode])
-            
-            print("SetQHYCCDReadMode() ret =", ret)
-
-            # 设置相机模式 
-            ret = self.qhyccddll.SetQHYCCDStreamMode(self.camhandle, self.camera_mode_ids[self.camera_mode])
-            print("SetQHYCCDStreamMode() ret =", ret)
-            # 初始化相机
-            ret = self.qhyccddll.InitQHYCCD(self.camhandle)
-            print("InitQHYCCD() ret =", ret)
-            print("相机已开启!")
-            
-            # 更新参数
-            self.update_camera_color()
-            self.update_limit_selector()
-            self.update_camera_config()
-            self.update_readout_mode_selector()
-            self.update_camera_pixel_bin(bin=bin)
-            self.update_depth_selector()
-            self.update_resolution(0,0,self.image_w,self.image_h)
-            self.update_camera_mode()
-            self.update_camera_temperature()
-            self.update_CFW_control()
-            self.start_capture_status_thread()
-            
-            # 启用复选框
-            self.show_settings_checkbox.setEnabled(True)
-            self.show_control_checkbox.setEnabled(True)
-            self.show_image_control_checkbox.setEnabled(True)
-            
-            # 显示复选框
-            self.toggle_settings_box(True)
-            self.toggle_control_box(True)
-            self.toggle_image_control_box(True)
-            
-            self.camera_state = True
-            self.connect_button.setEnabled(False)
-            self.reset_camera_button.setEnabled(False)
-            
-            self.config_label.setText(f'已连接!')
-            self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
-                
-            self.state_label.setText("连接相机完成")
-    
-    def disconnect_camera(self):
-        """断开相机连接"""
-        if self.camhandle == 0:
+        self.camera_connection_thread = CameraConnectionThread(self.qhyccddll, self.camera_ids[camera_name],mode,self.camera_mode_ids[self.camera_mode], self.language,self)
+        self.camera_connection_thread.handle_signal.connect(self.handle_signal)
+        self.camera_connection_thread.get_read_mode_signal.connect(self.get_read_mode_signal)
+        self.camera_connection_thread.update_status_signal.connect(self.append_text)
+        self.camera_connection_thread.already_connected_signal.connect(self.already_connected_signal)
+        self.camera_connection_thread.already_disconnected_signal.connect(self.already_disconnected_signal)
+        self.camera_connection_thread.start()
+      
+    def handle_signal(self,signal):
+        self.camhandle = int(signal)
+        
+    def get_read_mode_signal(self,read_mode):
+        self.camera_read_mode_ids.clear()
+        self.camera_read_mode_ids = read_mode
+        
+    def already_connected_signal(self,connected):
+        if not connected:
+            # self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
+            warnings.warn(f"{translations[self.language]['debug']['camera_connected_failed']}")
             return
-        if self.capture_in_progress:
-            self.cancel_capture()
-
-            
-        ret = self.qhyccddll.CloseQHYCCD(self.camhandle)
-        print("CloseQHYCCD() ret =", ret)
-
-        # 释放QHYCCD资源
-        ret = self.qhyccddll.ReleaseQHYCCDResource()
-        print("ReleaseQHYCCDResource() ret =", ret)
-        self.camhandle = 0
-        self.config_label.setText('未连接')
-        self.config_label.setStyleSheet("color: red;")  # 设置字体颜色为红色
-        print("相机已关闭！")
+        # 更新参数
+        self.update_camera_color()
+        self.update_limit_selector()
+        self.update_camera_config()
+        self.update_readout_mode_selector()
+        self.update_camera_pixel_bin(bin=bin)
+        self.update_depth_selector()
+        self.update_debayer_mode()
+        self.update_resolution(0,0,self.image_w,self.image_h)
+        self.update_camera_mode()
+        self.update_camera_temperature()
+        self.update_CFW_control()
+        self.start_capture_status_thread()
+        # 启用复选框
+        self.show_settings_checkbox.setEnabled(True)
+        self.show_control_checkbox.setEnabled(True)
+        self.show_image_control_checkbox.setEnabled(True)
         
+        # 显示复选框
+        self.toggle_settings_box(True)
+        self.toggle_control_box(True)
+        self.toggle_image_control_box(True)
+        
+        self.camera_state = True
+        self.connect_button.setEnabled(False)
+        self.reset_camera_button.setEnabled(False)
+        
+        self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["connected"]}')
+        self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
+        self.connect_button.setEnabled(True)
+    
+    def already_disconnected_signal(self,disconnected):
+        if not disconnected:
+            return
+        
+        self.camhandle = 0
+        self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["disconnected"]}')
+        self.config_label.setStyleSheet("color: red;")  # 设置字体颜色为红色
+ 
         self.current_image = None
         self.current_image_name = None
-        
-        if self.is_color_camera:    
-            # 断开连接信号
-            for slider in [self.wb_red, self.wb_green, self.wb_blue]:
-                slider.valueChanged.disconnect()  # 断开之前的连接
-        
+        try:    
+            if self.is_color_camera:    
+                # 断开连接信号
+                for slider in [self.wb_red, self.wb_green, self.wb_blue]:
+                    slider.valueChanged.disconnect()  # 断开之前的连接
+        except Exception as e:
+            warnings.warn(f"{translations[self.language]['debug']['disconnect_white_balance_failed']}: {e}")
         self.init_state = False
         # 初始化所有区域为隐藏状态
         self.settings_box.setVisible(False)
@@ -969,39 +972,47 @@ class CameraControlWidget(QWidget):
         
         self.reset_camera_button.setEnabled(True)
         
+        self.settings_dialog.camera_info_label.setText(f'{translations[self.language]["qhyccd_capture"]["camera_info_disconnected"]}')
         self.stop_preview()
-        self.state_label.setText("断开相机连接")
+        self.disconnect_button.setEnabled(True)
+
+    def disconnect_camera(self):
+        """断开相机连接"""
+        if self.camhandle == 0:
+            return
+        self.disconnect_button.setEnabled(False)
+        if self.capture_in_progress:
+            self.cancel_capture()
+
+        self.camera_connection_thread.disconnect()
+        self.camera_connection_thread.wait()
 
     def start_capture_status_thread(self):
         if self.capture_status_thread is None:
-            self.capture_status_thread = CaptureStatusThread(self.qhyccddll, self.camhandle)
+            self.capture_status_thread = CaptureStatusThread(self.qhyccddll, self.camhandle,self.language)
             self.capture_status_thread.update_status.connect(self.capture_status_label.setText)
             self.capture_status_thread.end_capture.connect(self.end_capture)
             self.capture_status_thread.start()
             self.capture_status_thread.pause_capture()
             
     def end_capture(self):
-        if self.capture_status_label.text().startswith("拍摄中"):
-            self.capture_status_label.setText("拍摄完成！")
+        if self.capture_status_label.text().startswith(translations[self.language]["qhyccd_capture"]["capturing"]):
+            self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_complete"])
                
     def update_camera_color(self):
         # 判断相机是否是彩色相机
         try:
             if not self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value):
-                min_data, max_data, step = self.getParamlimit(CONTROL_ID.CAM_IS_COLOR.value)
-                print(f"彩色相机判断参数: min_data:{min_data}, max_data:{max_data}, step:{step}")
                 is_color_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value)
                 if is_color_value == 4294967295.0:
-                    print("返回值表示错误或无效，使用相机名字进行判断")
+                    warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_is_color_camera_failed']}")
+                    # print("返回值表示错误或无效，使用相机名字进行判断")
                     self.is_color_camera = self.is_color_camera_by_name(self.camera_name)
                 else:
-                    self.is_color_camera = (int(min_data) == 0)
+                    self.is_color_camera = not bool(is_color_value)
             else:
                 self.is_color_camera = self.is_color_camera_by_name(self.camera_name)
-
-            print(f"相机是否是彩色相机: {self.is_color_camera}")
         except Exception as e:
-            print(f"获取相机颜色信息时出错: {e}")
             self.is_color_camera = self.is_color_camera_by_name(self.camera_name)
         
         if not self.is_color_camera:
@@ -1017,27 +1028,36 @@ class CameraControlWidget(QWidget):
 
             self.bayer_name.setVisible(False)
             self.layout().removeWidget(self.bayer_name)  # 从布局中移除
+            
+            self.Debayer_mode_selector.setEnabled(False)
+            self.Debayer_mode_selector.setVisible(False)
+            self.Debayer_mode_label.setVisible(False)
 
         else:
             self.wb_group.setVisible(True)
             self.wb_group.setEnabled(True)
             self.bayer_conversion_selector.setVisible(True)
             self.bayer_conversion_selector.setEnabled(True)
+            
+            self.Debayer_mode_selector.setVisible(True)
+            self.Debayer_mode_selector.setEnabled(True)
+            self.Debayer_mode_label.setVisible(True)
+            
             self.bayer_name.setVisible(True)
-            if self.camera_mode == "连续模式":  
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:  
                 for slider in [self.wb_red, self.wb_green, self.wb_blue]:
                     slider.valueChanged.connect(self.apply_white_balance_hardware)
             else:
                 for slider in [self.wb_red, self.wb_green, self.wb_blue]:
                     slider.valueChanged.connect(lambda: self.on_set_white_balance_clicked())
             
-        self.state_label.setText("判断是否为彩色相机")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_color"]}')
             
     def update_limit_selector(self):
         # 设置曝光限制
         exposure = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value)
         min_data, max_data, _ = self.getParamlimit(CONTROL_ID.CONTROL_EXPOSURE.value)
-        print("exposure_time", min_data, max_data)
+        # print("exposure_time", min_data, max_data)
         self.exposure_time.setRange(min_data/1000, max_data/1000)  # 使用 QDoubleSpinBox 设置范围
         self.exposure_time.setValue(exposure/1000)
         self.exposure_time.setSingleStep(1/1000)
@@ -1045,7 +1065,7 @@ class CameraControlWidget(QWidget):
         # 设置增益
         gain = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value)
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_GAIN.value)
-        print("gain", min_data, max_data)
+        # print("gain", min_data, max_data)
         self.gain.setRange(int(min_data), int(max_data))
         self.gain.setSingleStep(float(step))
         self.gain.setValue(int(gain))
@@ -1053,7 +1073,7 @@ class CameraControlWidget(QWidget):
         # 设置偏移
         offset = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value)
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_OFFSET.value)
-        print("offset", min_data, max_data)
+        # print("offset", min_data, max_data)
         self.offset.setRange(int(min_data), int(max_data))
         self.offset.setSingleStep(float(step))
         self.offset.setValue(int(offset))
@@ -1061,7 +1081,7 @@ class CameraControlWidget(QWidget):
         # 设置USB宽带
         usb_traffic = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value)
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_USBTRAFFIC.value)
-        print("usb_traffic", min_data, max_data)
+        # print("usb_traffic", min_data, max_data)
         self.usb_traffic.setRange(int(min_data), int(max_data))
         self.usb_traffic.setSingleStep(int(step))
         self.usb_traffic.setValue(int(usb_traffic))
@@ -1077,8 +1097,7 @@ class CameraControlWidget(QWidget):
             self.wb_red.setEnabled(True)
             wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBR.value)
-            print(f"wb_red:{wb_red},min_data:{min_data},max_data:{max_data},step:{step}")
-            if self.camera_mode == "单帧模式":
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.wb_red.setRange(int(-100), int(100))
                 self.wb_red.setSingleStep(int(1))
                 self.wb_red.setValue(int(0))
@@ -1097,8 +1116,8 @@ class CameraControlWidget(QWidget):
             self.wb_green.setEnabled(True)
             wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBG.value)
-            print(f"wb_green:{wb_green},min_data:{min_data},max_data:{max_data},step:{step}")
-            if self.camera_mode == "单帧模式":
+            # print(f"wb_green:{wb_green},min_data:{min_data},max_data:{max_data},step:{step}")
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.wb_green.setRange(int(-100), int(100))
                 self.wb_green.setSingleStep(int(1))
                 self.wb_green.setValue(int(0))
@@ -1117,8 +1136,8 @@ class CameraControlWidget(QWidget):
             self.wb_blue.setEnabled(True)
             wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBB.value)
-            print(f"wb_blue:{wb_blue},min_data:{min_data},max_data:{max_data},step:{step}")
-            if self.camera_mode == "单帧模式":
+            # print(f"wb_blue:{wb_blue},min_data:{min_data},max_data:{max_data},step:{step}")
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.wb_blue.setRange(int(-100), int(100))
                 self.wb_blue.setSingleStep(int(1))
                 self.wb_blue.setValue(int(0))
@@ -1133,8 +1152,10 @@ class CameraControlWidget(QWidget):
         sizeX = ctypes.c_uint32()
         sizeY = ctypes.c_uint32()
         ret = self.qhyccddll.GetQHYCCDEffectiveArea(self.camhandle, byref(startX), byref(startY), byref(sizeX), byref(sizeY))
-        print(f"GetQHYCCDEffectiveArea() ret =", ret)
-        print(f"startX:{startX.value},startY:{startY.value},sizeX:{sizeX.value},sizeY:{sizeY.value}")
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_effective_area_failed']}: {ret}")
+        # print(f"GetQHYCCDEffectiveArea() ret =", ret)
+        # print(f"startX:{startX.value},startY:{startY.value},sizeX:{sizeX.value},sizeY:{sizeY.value}")
         self.camera_H = sizeY.value
         self.camera_W = sizeX.value
         self.x.setRange(int(startX.value),int(startX.value+sizeX.value))
@@ -1142,7 +1163,7 @@ class CameraControlWidget(QWidget):
         self.w.setRange(1,int(sizeX.value))
         self.h.setRange(1,int(sizeY.value))
         
-        self.state_label.setText("对参数增加限制")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_limit_selector"]}')
     
     def update_camera_config(self):
         """更新相机配置显示"""
@@ -1156,27 +1177,40 @@ class CameraControlWidget(QWidget):
 
         ret = self.qhyccddll.GetQHYCCDChipInfo(self.camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW),
                                         byref(pixelH), byref(imageB))
-        # print("GetQHYCCDChipInfo() ret =", ret)
-        # print("GetQHYCCDChipInfo() chip info =", chipW.value, "x", chipH.value, "mm")
-        # print("GetQHYCCDChipInfo() pixel info =", pixelW.value, "x", pixelH.value, "um")
-        # print("GetQHYCCDChipInfo() image info =", imageW.value, "x", imageH.value, imageB.value, "bits")
-
-        # self.camera_W = imageW.value
-        # self.camera_H = imageH.value
-        print(f"imageW:{self.camera_W},imageH:{self.camera_H}")
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_chip_info_failed']}: {ret}")
         self.image_w = imageW.value
         self.image_h = imageH.value
         self.camera_bit = imageB.value
         self.camera_depth_options = self.swap_elements(self.camera_depth_options, f"{imageB.value}bit")
-        print(f'芯片宽度: {chipW.value}\n'
-                       f'芯片高度: {chipH.value}\n'
-                       f'图像宽度: {imageW.value}\n'
-                       f'图像高度: {imageH.value}\n'
-                       f'像素宽度: {pixelW.value}\n'
-                       f'像素高度: {pixelH.value}\n'
-                       f'图像位深: {imageB.value}')
 
-        self.state_label.setText("更新相机状态")
+ 
+        # 计算最长的标签长度
+        max_label_length = max(
+            len(translations[self.language]["qhyccd_capture"]["camera_info_name"]),
+            len(translations[self.language]["qhyccd_capture"]["camera_info_chip"]),
+            len(translations[self.language]["qhyccd_capture"]["camera_info_image"]),
+            len(translations[self.language]["qhyccd_capture"]["camera_info_pixel"])
+        )
+
+        # 计算最长的值字符串长度
+        max_value_length = max(
+            len(self.camera_name),
+            len(f"{str(chipW.value)}um * {str(chipH.value)}um"),
+            len(f"{str(imageW.value)}px * {str(imageH.value)}px {str(imageB.value)}bit"),
+            len(f"{str(pixelW.value)}um * {str(pixelH.value)}um")
+        )
+
+        # 设置文本并居中对齐
+        self.settings_dialog.camera_info_label.setText(
+            f'\n'
+            f'{translations[self.language]["qhyccd_capture"]["camera_info_name"].center(max_label_length)}: {self.camera_name.center(max_value_length)}\n'
+            f'{translations[self.language]["qhyccd_capture"]["camera_info_chip"].center(max_label_length)}: {f"{str(chipW.value)}um * {str(chipH.value)}um".center(max_value_length)}\n'
+            f'{translations[self.language]["qhyccd_capture"]["camera_info_image"].center(max_label_length)}: {f"{str(imageW.value)}px * {str(imageH.value)}px {str(imageB.value)}bit".center(max_value_length)}\n'
+            f'{translations[self.language]["qhyccd_capture"]["camera_info_pixel"].center(max_label_length)}: {f"{str(pixelW.value)}um * {str(pixelH.value)}um".center(max_value_length)}\n'
+        )
+
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_config"]}')
     # 更新 pixel_bin_selector 中的选项
     def update_readout_mode_selector(self):
         self.readout_mode_selector.clear()  # 清空现有选项
@@ -1185,22 +1219,40 @@ class CameraControlWidget(QWidget):
 
     def update_camera_pixel_bin(self,bin=[1,1]):
         self.pixel_bin_selector.clear()  # 清空现有选项
+        # 将字典的键转换为列表并获取第i个键
+        key_list = list(self.camera_pixel_bin.keys())
         updated_items = []
-        for i in list(self.camera_pixel_bin.keys()):
-            if self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin[i][0], self.camera_pixel_bin[i][1]) != -1:
-                if self.camera_pixel_bin[i] == bin:
-                    updated_items.insert(0,i)
-                    continue
-                updated_items.append(i)
+        for index, i in enumerate([CONTROL_ID.CAM_BIN1X1MODE.value, CONTROL_ID.CAM_BIN2X2MODE.value, CONTROL_ID.CAM_BIN3X3MODE.value, CONTROL_ID.CAM_BIN4X4MODE.value]):
+            if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, i) == 0:
+                updated_items.append(key_list[index])
+            
         # ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, 1, 1) 
         ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin[updated_items[0]][0], self.camera_pixel_bin[updated_items[0]][1])
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
         
-        self.image_w = int(self.camera_W/self.camera_pixel_bin[updated_items[0]][0])
-        self.image_h = int(self.camera_H/self.camera_pixel_bin[updated_items[0]][1])
-        print(f"update_camera_pixel_bin:{ret}, {self.camera_pixel_bin[updated_items[0]]},w:{self.image_w},h{self.image_h}")
+        chipW = ctypes.c_double()  # 芯片宽度
+        chipH = ctypes.c_double()  # 芯片高度
+        imageW = ctypes.c_uint32()  # 图像宽度
+        imageH = ctypes.c_uint32()  # 图像高度
+        pixelW = ctypes.c_double()  # 像素宽度
+        pixelH = ctypes.c_double()  # 像素高度
+        imageB = ctypes.c_uint32()  # 图像位深度
+        
+        # 获取相机信息
+        ret = self.qhyccddll.GetQHYCCDChipInfo(self.camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW),
+                                        byref(pixelH), byref(imageB))
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_chip_info_failed']}: {ret}")
+        
+        self.image_w = int(imageW.value/self.camera_pixel_bin[updated_items[0]][0])
+        self.image_h = int(imageH.value/self.camera_pixel_bin[updated_items[0]][1])
+        
+        self.update_resolution(0,0,self.image_w,self.image_h)
+        
         self.pixel_bin_selector.addItems(updated_items)  # 添加新的选项
         
-        self.state_label.setText("更新bin模式")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_bin_mode"]}')
         
     def update_depth_selector(self):
         minValue,maxValue,step=self.getParamlimit(CONTROL_ID.CONTROL_TRANSFERBIT.value)
@@ -1209,21 +1261,44 @@ class CameraControlWidget(QWidget):
         self.camera_depth_options.clear()
         for i in range(int(minValue),int(maxValue+1),int(step)):
             self.camera_depth_options[f"{i}bit"] = i
-        print(f"位深度数: \nmin:{minValue} , max:{maxValue} , step:{step}")
+        # print(f"位深度数: \nmin:{minValue} , max:{maxValue} , step:{step}")
         updated_items = list(self.camera_depth_options.keys())  # 获取新的选项列表
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, self.camera_depth_options[updated_items[0]])
         if ret == -1:
-            print(f"位深{self.camera_depth_options[updated_items[0]]}设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
             return -1
         self.camera_bit = self.camera_depth_options[updated_items[0]]
         self.depth_selector.addItems(updated_items)  # 添加新的选项
         
-        self.state_label.setText("更新位深模式")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_depth_mode"]}')
     
+    def update_debayer_mode(self):
+        if not self.is_color_camera or self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+            self.Debayer_mode_selector.setEnabled(False)
+            self.Debayer_mode_selector.setVisible(False)
+            self.Debayer_mode_label.setVisible(False)
+            self.Debayer_mode = False
+            ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, False)
+            if ret == -1:
+                # print(f"Debayer模式{mode}设置失败!")
+                warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+        elif self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.is_color_camera:
+            self.Debayer_mode_selector.setEnabled(True)
+            self.Debayer_mode_selector.setVisible(True)
+            self.Debayer_mode_label.setVisible(True)
+            self.Debayer_mode_selector.setCurrentText(translations[self.language]["qhyccd_capture"]["debayer_mode_false"])
+            self.Debayer_mode = False
+            ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, False)
+            if ret == -1:
+                # print(f"Debayer模式{mode}设置失败!")
+                warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+
     def update_resolution(self,x,y,w,h):
-        print(f"分辨率W:{w},H:{h}")
         # 设置分辨率
         ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, x, y, w, h)
+        if ret == -1:
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
+            return -1
         self.x.setRange(0,w-1)
         self.x.setValue(x)
         self.y.setRange(0,h-1)
@@ -1232,21 +1307,17 @@ class CameraControlWidget(QWidget):
         self.w.setValue(w)
         self.h.setRange(0,h)
         self.h.setValue(h)
-        self.state_label.setText("更新初始分辨率")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_resolution"]}')
         return ret
     
     def update_camera_mode(self):
         # 判断相机是单帧模式还是连续模式
-        if self.camera_mode == '连续模式':
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.video_control_box.setVisible(True)
             self.show_video_control_checkbox.setVisible(True)
             self.show_video_control_checkbox.setEnabled(True)
             self.toggle_video_control_box(True)
             self.start_preview()
-            self.depth_selector.setEnabled(False)
-            self.depth_selector.setVisible(False)
-            self.layout().removeWidget(self.depth_selector)  # 从布局中移除
-            self.depth_name.setVisible(False)
             self.layout().removeWidget(self.depth_name)  # 从布局中移除
             
             self.fps_label.setVisible(True)
@@ -1257,18 +1328,13 @@ class CameraControlWidget(QWidget):
             self.layout().removeWidget(self.show_video_control_checkbox)  # 从布局中移除
             self.show_video_control_checkbox.setVisible(False)
             self.show_video_control_checkbox.setEnabled(False)
-            # self.toggle_video_control_box(False)
-            self.depth_selector.setEnabled(True)
-            self.depth_selector.setVisible(True)
-            self.depth_name.setVisible(True)
             self.fps_label.setVisible(False)
-        self.state_label.setText("更新相机模式")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_mode"]}')
     
     def update_camera_temperature(self):
         # 判断相机是否支持温度控制
         self.has_temperature_control = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value) != 0
-        
-        print(f"has_temperature_control:{self.has_temperature_control}")
+        # print(f"has_temperature_control:{self.has_temperature_control}")
         
         if self.has_temperature_control:
             self.show_temperature_control_checkbox.show()
@@ -1283,11 +1349,11 @@ class CameraControlWidget(QWidget):
             self.show_temperature_control_checkbox.hide()
             self.layout().removeWidget(self.show_temperature_control_checkbox)  # 从布局中移除
             self.temperature_update_timer.stop()
-        self.state_label.setText("更新相机温度控制")
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_temperature_control"]}')
     
     def update_CFW_control(self):
         self.is_CFW_control = self.qhyccddll.IsQHYCCDCFWPlugged(self.camhandle) == 0
-        print(f"is_CFW_control:{self.is_CFW_control}")
+        # print(f"is_CFW_control:{self.is_CFW_control}")
         
         if self.is_CFW_control:
             self.show_CFW_control_checkbox.show()
@@ -1302,7 +1368,7 @@ class CameraControlWidget(QWidget):
                     hex_str = hex(i)
                     # 移除 '0x' 前缀
                     hex_str = hex_str[2:]
-                    self.CFW_number_ids[f"滤镜{i}"] = hex_str
+                    self.CFW_number_ids[f"{translations[self.language]['qhyccd_capture']['CFW_position']}{i}"] = hex_str
                 self.CFW_filter_selector.clear()
                 self.CFW_filter_selector.addItems(list(self.CFW_number_ids.keys()))  # 示例项
         else:
@@ -1312,8 +1378,7 @@ class CameraControlWidget(QWidget):
             self.layout().removeWidget(self.show_CFW_control_checkbox)  # 从布局中移除
             self.toggle_CFW_control_box(False)
             self.show_CFW_control_checkbox.setEnabled(False)
-        self.state_label.setText("更新相机滤镜轮控制")
-    
+        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_CFW_control"]}')   
     # 设置分辨率
     def on_set_resolution_clicked(self):
         x = int(self.x.value())
@@ -1331,38 +1396,46 @@ class CameraControlWidget(QWidget):
         self.image_w = w
         self.image_h = h
         
+        self.image_x = x
+        self.image_y = y
+        
         # 在这里添加处理分辨率设置的代码
-        print(f"设置分辨率为: ({x},{y}) --> ({x+w},{y+h})")
-        if self.camera_mode == "连续模式" and self.preview_thread is not None:
+        # print(f"设置分辨率为: ({x},{y}) --> ({x+w},{y+h})")
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is not None:
             self.stop_preview()
         # 设置相机分辨率为图像的宽度和高度
         ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, x, y,w , h)
         if ret == -1:
-            print(f"分辨率设置失败!")
+            # print(f"分辨率设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
-        print("SetQHYCCDResolution() ret =", ret)
-        if self.camera_mode == "连续模式" and self.preview_thread is None:
+        # print("SetQHYCCDResolution() ret =", ret)
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is None:
             self.start_preview()
-        self.state_label.setText(f"设置分辨率为({x},{y}) --> ({x+w},{y+h})")
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['set_resolution']}({x},{y}) --> ({x+w},{y+h})")
         return ret
 
     def on_set_original_resolution_clicked(self):
-        if self.camera_mode == "连续模式" and self.preview_thread is not None:
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is not None:
             self.stop_preview()
         # 设置相机分辨率为图像的宽度和高度
         ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, 0, 0,self.camera_W , self.camera_H)
         if ret == -1:
-            print(f"分辨率设置失败!")
+            # print(f"分辨率设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
-        print(f"还原分辨率设置为: ({0},{0}) --> ({self.camera_W},{self.camera_H})")
+        # print(f"还原分辨率设置为: ({0},{0}) --> ({self.camera_W},{self.camera_H})")
         self.image_w = self.camera_W
         self.image_h = self.camera_H
+        self.image_x = 0
+        self.image_y = 0
         self.x.setValue(0)
         self.y.setValue(0)
         self.w.setValue(self.image_w)
         self.h.setValue(self.image_h)
-        if self.camera_mode == "连续模式" and self.preview_thread is None:
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is None:
             self.start_preview()
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['set_resolution']}({0},{0}) --> ({self.camera_W},{self.camera_H})")
 
     '''
     控制相机设置区域的显示与隐藏
@@ -1373,7 +1446,7 @@ class CameraControlWidget(QWidget):
             visible = not self.settings_box.isVisible()
         else:
             visible = state
-        print(f"toggle_settings_box:{visible} , state:{state}")
+        # print(f"toggle_settings_box:{visible} , state:{state}")
         self.settings_box.setVisible(visible)
         self.show_settings_checkbox.setStyleSheet("background-color: green;" if visible else "")  # 设置按钮颜色
 
@@ -1448,34 +1521,33 @@ class CameraControlWidget(QWidget):
         mode = self.readout_mode_selector.itemText(index)
         if mode == ' ' or mode is None :
             return -1
-        print(f'选中的读出模式: {mode}')
+        # print(f'选中的读出模式: {mode}')
         
         
         # 在这里添加设置读出模式的代码
         self.disconnect_camera()
-        self.connect_camera(mode=mode,bin=self.bin)
-
+        self.connect_camera(mode=self.camera_read_mode_ids[mode])
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['update_readout_mode']}{mode}")
     @pyqtSlot(int)
     def on_pixel_bin_changed(self, index):
         if not self.camera_state:
             return -1
-        # 获取选中的像素合并 Bin
         bin_size = self.pixel_bin_selector.itemText(index)
-        if self.camera_mode == "连续模式":
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.stop_preview()
-        print(f'选中的像素合并 Bin: {bin_size}')
         ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin[bin_size][0], self.camera_pixel_bin[bin_size][1])
         if ret == -1:
-            print(f"像素合并 Bin {bin_size} 设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
             return -1
         self.bin = self.camera_pixel_bin[bin_size]
         self.image_w = int(self.camera_W/self.camera_pixel_bin[bin_size][0])
         self.image_h = int(self.camera_H/self.camera_pixel_bin[bin_size][1])
-        print("SetQHYCCDBinMode() ret =", ret)
+        # print("SetQHYCCDBinMode() ret =", ret)
         self.update_resolution(0,0,self.image_w,self.image_h)
-        if self.camera_mode == "连续模式":
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.start_preview()
         # self.update_camera_config()
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['update_pixel_bin']}{bin_size}")
         return ret
 
     @pyqtSlot(int)
@@ -1484,38 +1556,77 @@ class CameraControlWidget(QWidget):
         depth = self.depth_selector.itemText(index)
         if depth == ' ' or depth is None or depth == '':
             return -1
-        print(f'选中的输出格式: {self.camera_depth_options[depth]},{type(self.camera_depth_options[depth])}')
+        
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            if self.camera_depth_options[depth] == 16 and self.is_color_camera:
+                ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle,False)
+                if ret == -1:
+                    # print(f"Debayer模式设置失败!")
+                    warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+                self.Debayer_mode_selector.setEnabled(False)
+                self.Debayer_mode_selector.setCurrentText(translations[self.language]["qhyccd_capture"]["debayer_mode_false"])
+                self.Debayer_mode = False
+            elif self.camera_depth_options[depth] == 8 and self.is_color_camera:
+                self.Debayer_mode_selector.setEnabled(True)
+            self.stop_preview()
+            
         # 在这里添加设置输出格式的代码
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, self.camera_depth_options[depth])
         if ret == -1:
-            print(f"位深{depth}设置失败!")
+            # print(f"位深{depth}设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
             return -1
         self.camera_bit = self.camera_depth_options[depth]
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            self.start_preview()
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['update_depth']}{depth}")
         # self.update_camera_config()
         return ret
 
+    @pyqtSlot(int)
+    def on_Debayer_mode_changed(self, index):
+        if not self.camera_state:
+            return -1
+        # 获取选中的Debayer模式
+        mode = self.Debayer_mode_selector.itemText(index)
+        if mode == ' ' or mode is None :
+            return -1
+        # print(f'选中的Debayer模式: {mode}')
+        self.Debayer_mode = self.camera_Debayer_mode[mode]
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            self.stop_preview()
+        ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, self.camera_Debayer_mode[mode])
+        if ret == -1:
+            # print(f"Debayer模式{mode}设置失败!")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+        
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            self.start_preview()
+        self.append_text(f"{translations[self.language]['qhyccd_capture']['update_debayer_mode']}{mode}")
+        return ret
+    
     def start_capture(self):
         if self.capture_in_progress :
             self.cancel_capture()
             return
         
         self.capture_in_progress = True
-        self.start_button.setText('取消拍摄')
+        self.start_button.setText(translations[self.language]["qhyccd_capture"]["cancel_capture"])
         self.capture_status_thread.resume_capture()
         
-        print("开始拍摄")
+        # print("开始拍摄")
         self.update_exposure_time()
-        if self.camera_mode == "单帧模式":
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
             self.capture_thread = CaptureThread(
-                self.camhandle, self.qhyccddll, self.image_w, self.image_h, self.camera_bit, self.is_color_camera, self.bayer_conversion
+                self.camhandle, self.qhyccddll, self.image_w, self.image_h, self.camera_bit, self.is_color_camera, self.bayer_conversion,self.language
             )
             self.capture_thread.capture_finished.connect(self.on_capture_finished)
             self.capture_thread.start()
-        elif self.camera_mode == "连续模式":
+        elif self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             while self.preview_image is None:
                 time.sleep(0.1)
             self.on_capture_finished(self.preview_image)
-        self.state_label.setText("开始拍摄")
+        self.append_text(translations[self.language]["qhyccd_capture"]["start_capture"])
             
     def on_capture_finished(self, imgdata_np):
         if not self.capture_in_progress :
@@ -1525,26 +1636,28 @@ class CameraControlWidget(QWidget):
 
         if self.bayer_conversion != "None" and imgdata_np.ndim == 2:
             imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
-            
+        
+        # if imgdata_np.ndim == 3 and imgdata_np.shape[2] == 3:
+        #     imgdata_np = imgdata_np[:, :, [2, 1, 0]]  # 将BGR转换为RGB
         # 获取当前时间并格式化
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         camera_name = self.camera_selector.currentText()
         
         display_mode = self.display_mode_selector.currentText()
         
-        if display_mode == '分布式显示':
-            print(f"分布式显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
+        if display_mode == translations[self.language]["qhyccd_capture"]["distributed_display"]:
+            # print(f"分布式显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             self.current_image = imgdata_np
             self.current_image_name = f'{camera_name}-{current_time}'
             self.viewer.add_image(self.current_image, name=self.current_image_name)
-            if self.camera_mode == "单帧模式":
-                print("单帧模式")
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+                # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
-        elif display_mode == '单一显示':
+        elif display_mode == translations[self.language]["qhyccd_capture"]["single_display"]:
             self.current_image_name = f'{camera_name}-one'
-            print(f"单一显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
-            if self.current_image_name in self.viewer.layers and self.current_image.ndim == imgdata_np.ndim and self.current_image.shape[-1] == imgdata_np.shape[-1]:
+            # print(f"单一显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
+            if self.current_image is not None and self.current_image_name in self.viewer.layers and self.current_image.ndim == imgdata_np.ndim and self.current_image.shape == imgdata_np.shape:
                 self.current_image = imgdata_np
 
                 self.viewer.layers[self.current_image_name].data = self.current_image
@@ -1555,13 +1668,13 @@ class CameraControlWidget(QWidget):
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
             # 确保图像在最上层
             self.viewer.layers.selection.active = self.viewer.layers[self.current_image_name]
-            if self.camera_mode == "单帧模式":
-                print("单帧模式")
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+ 
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
-        elif display_mode == '序列显示':
+        elif display_mode == translations[self.language]["qhyccd_capture"]["sequential_display"]:
             # 打印图像的形状和维度
-            print(f"序列显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
+            # print(f"序列显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             if imgdata_np.ndim == 2:
                 imgdata_np_3c = np.stack([imgdata_np] * 3, axis=-1)
                 imgdata_np_3c = imgdata_np_3c[np.newaxis, ...]
@@ -1569,7 +1682,7 @@ class CameraControlWidget(QWidget):
                 # imgdata_np = imgdata_np.transpose(2,0,1)
                 imgdata_np_3c = imgdata_np[np.newaxis, ...]
             # print(f"imgdata_np.ndim: {imgdata_np.ndim}")
-            if self.current_image is None or (imgdata_np_3c.ndim != self.current_image.ndim and imgdata_np_3c.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
+            if self.current_image is None or (imgdata_np_3c.ndim != self.current_image.ndim and imgdata_np_3c.shape[1:] != self.current_image.shape[1:] and imgdata_np_3c.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
                 self.current_image = imgdata_np_3c
                 self.current_image_name = f'{camera_name}-sequence'
             else:
@@ -1582,8 +1695,8 @@ class CameraControlWidget(QWidget):
             else:
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
             
-            if self.camera_mode == "单帧模式" and self.is_color_camera:
-                print("单帧模式")
+            if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and self.is_color_camera:
+                # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
             # 定位显示拍摄的最后一张图片
@@ -1592,33 +1705,33 @@ class CameraControlWidget(QWidget):
         # 确保图像在最上层
         if self.viewer.layers:
             self.viewer.layers.selection.active = self.viewer.layers[-1]
-        if not self.top_checkbox.isChecked():
-            self.contrast_limits_name = self.current_image_name
+        self.contrast_limits_name = self.current_image_name
         
         self.bind_contrast_limits_event()
 
-        print(f"拍摄完成！")
-        self.state_label.setText("拍摄完成")
+        # print(f"拍摄完成！")
+        self.append_text(translations[self.language]["qhyccd_capture"]["capture_finished"])
         
         self.capture_in_progress = False
-        self.start_button.setText('开始拍摄')
-        self.capture_status_label.setText('拍摄完成！')
-        self.histogram_widget.update_histogram(imgdata_np)
+        self.start_button.setText(translations[self.language]["qhyccd_capture"]["start_capture"])
+        self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_finished"])
+        self.img_buffer.put(imgdata_np)
+        self.histogram_widget.update_histogram()
         # self.capture_status_thread.pause_capture()
 
     def cancel_capture(self):
         self.capture_in_progress = False
-        self.start_button.setText('开始拍摄')
-        self.capture_status_label.setText('拍摄已取消')
-        self.state_label.setText("取消拍摄")
+        self.start_button.setText(translations[self.language]["qhyccd_capture"]["start_capture"])
+        self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_canceled"])
+        self.append_text(translations[self.language]["qhyccd_capture"]["cancel_capture"])
         self.capture_status_thread.pause_capture()
         self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle)
-        print("拍摄已取消")
+        # print("拍摄已取消")
 
     def save_image(self):
         if self.current_image is not None:
             options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getSaveFileName(self, "保存图像", "", "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)", options=options)
+            file_path, _ = QFileDialog.getSaveFileName(self, translations[self.language]["qhyccd_capture"]["save_image"], "", "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)", options=options)
             if file_path:
                 if not (file_path.endswith('.png') or file_path.endswith('.jpg')):
                     file_path += '.png'
@@ -1627,13 +1740,12 @@ class CameraControlWidget(QWidget):
                     cv2.imwrite(file_path, self.current_image)
                 elif self.current_image.ndim == 3 and self.current_image.shape[2] == 3:
                     cv2.imwrite(file_path, cv2.cvtColor(self.current_image, cv2.COLOR_RGB2BGR))
-                print(f"图像已保存到: {file_path}")
-                self.state_label.setText(f"图像已保存到{file_path}")
+                # print(f"图像已保存到: {file_path}")
+                self.append_text(f"{translations[self.language]['qhyccd_capture']['save_image_success']}:{file_path}")
         else:
-            print("没有图像可保存")
-            self.state_label.setText(f"图像保存失败")
-        
-
+            # print("没有图像可保存")
+            self.append_text(translations[self.language]["qhyccd_capture"]["save_image_failed"])
+    
     def getParamlimit(self,data_id):
         minValue = ctypes.c_double()  # 最小值
         maxValue = ctypes.c_double()  # 最大值
@@ -1641,64 +1753,69 @@ class CameraControlWidget(QWidget):
         
         ret = self.qhyccddll.GetQHYCCDParamMinMaxStep(self.camhandle, data_id,byref(minValue),byref(maxValue),byref(step))
         if ret == -1:
-            print(f"参数范围获取失败！")
+            # print(f"参数范围获取失败！")
+            warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_param_failed']}: {ret}")
         return minValue.value,maxValue.value,step.value
     
     def update_exposure_time(self):
         
         # 处理曝光时间变化的逻辑
         exposure_time = int(self.exposure_time.value()*1000)
-        print(f"exposure_time:{exposure_time},{type(exposure_time)}")
+        # print(f"exposure_time:{exposure_time},{type(exposure_time)}")
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value, exposure_time)
         if ret == 0:
-            print(f"曝光时间设置为: {exposure_time} us")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_exposure_time_success']}: {exposure_time} us")
         else:
-            print(f"曝光时间设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_exposure_time_failed']}: {ret}")
         return ret
     
     def update_gain(self, value):
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value, value)
         if ret == 0:
-            print(f"增益设置为: {value} dB")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_gain_success']}: {value} dB")
         else:
-            print(f"增益设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_gain_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_gain_failed']}: {ret}")
         return ret
 
     def update_offset(self, value):
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value, value)
         if ret == 0:
-            print(f"偏移量设置为: {value} ")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_offset_success']}: {value} ")
         else:
-            print(f"偏移量设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_offset_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_offset_failed']}: {ret}")
         return ret
 
     def update_usb_traffic(self, value):
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value, value)
         if ret == 0:
-            print(f"USB带宽设置为: {value} ")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_usb_traffic_success']}: {value} ")
         else:
-            print(f"USB带宽设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_usb_traffic_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_usb_traffic_failed']}: {ret}")
         return ret
          
     def show_roi_component(self):
         # 检查是否存在以QHY开头的图片
         if not any(layer.name.startswith('QHY') for layer in self.viewer.layers ) :
-            print("没有以QHY开头的图片，无法启动ROI模式")
+            warnings.warn(f"{translations[self.language]['debug']['no_qhy_image']}")
+            self.append_text(f"{translations[self.language]['debug']['no_qhy_image']}")
             return
 
         if not self.roi_created:
             self.roi_created = True
-            self.show_roi_button.setText('应用ROI')
+            self.show_roi_button.setText(translations[self.language]["qhyccd_capture"]["apply_roi"])
             self.set_resolution_button.setEnabled(False)
             self.viewer.camera.interactive = False  # 锁定图像
-            print("ROI模式已激活，请在图像上点击以选择区域")
+            self.append_text(translations[self.language]["qhyccd_capture"]["roi_activated"])
         else:
             self.clear_roi()
             self.roi_created = False
-            self.show_roi_button.setText('ROI')
+            self.show_roi_button.setText(translations[self.language]["qhyccd_capture"]["roi"])
             self.set_resolution_button.setEnabled(True)
             self.viewer.camera.interactive = True  # 解锁图像
-            print("ROI模式已关闭")
+            self.append_text(translations[self.language]["qhyccd_capture"]["roi_closed"])
 
     def on_mouse_click(self, viewer, event):
         if not self.roi_created:
@@ -1709,9 +1826,8 @@ class CameraControlWidget(QWidget):
                 self.clear_roi()
 
             # 将鼠标点击位置转换为图像坐标
-            image_coords = self.viewer.layers[0].world_to_data(event.position)
+            image_coords = self.viewer.layers[-1].world_to_data(event.position)
             self.roi_points.append(image_coords)
-            print(f"ROI点: {self.roi_points}")
 
             if len(self.roi_points) == 2:
                 self.update_roi_layer()
@@ -1719,22 +1835,25 @@ class CameraControlWidget(QWidget):
 
     def on_mouse_double_click(self, viewer, event):
         self.clear_roi()
-        print("所有ROI矩形框已删除")
+        # print("所有ROI矩形框已删除")
         
     def on_save_mode_changed(self, index):
         self.save_mode = self.save_mode_selector.itemText(index)
-        print(f"选中的录像模式: {self.save_mode}")
-        if self.save_mode == '单帧存储':
+        # print(f"选中的录像模式: {self.save_mode}")
+        if self.save_mode == translations[self.language]["qhyccd_capture"]["single_frame_storage"]:
             self.save_format_selector.clear()
             self.save_format_selector.addItems(['png', 'jpeg', 'tiff', 'fits'])  # 图片格式
-        elif self.save_mode == '视频存储':
+        elif self.save_mode == translations[self.language]["qhyccd_capture"]["video_storage"]:
             self.save_format_selector.clear()
             self.save_format_selector.addItems(['avi', 'mp4', 'mkv'])  # 视频格式
 
     def clear_roi(self):
-        if self.roi_layer is not None:
-            self.viewer.layers.remove(self.roi_layer)
-            self.roi_layer = None
+        try:    
+            if self.roi_layer is not None and self.roi_layer in self.viewer.layers:
+                self.viewer.layers.remove(self.roi_layer)
+        except Exception as e:
+            warnings.warn(f"{translations[self.language]['debug']['clear_roi_failed']}: {e}")
+        self.roi_layer = None
         self.roi_points = []
 
     def update_roi_layer(self):
@@ -1742,8 +1861,8 @@ class CameraControlWidget(QWidget):
             self.viewer.layers.remove(self.roi_layer)
 
         if len(self.roi_points) == 2:
-            x0, y0 = self.roi_points[0]
-            x1, y1 = self.roi_points[1]
+            x0, y0 = self.roi_points[0][-2:]
+            x1, y1 = self.roi_points[1][-2:]
             rect = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
             self.roi_layer = self.viewer.add_shapes(
                 rect,
@@ -1759,23 +1878,23 @@ class CameraControlWidget(QWidget):
             y0,x0 = self.roi_points[0]
             if x0 < 0:
                 x0 = 0
-            if x0 > self.camera_W:
-                x0 = self.camera_W
+            if x0 > self.image_w:
+                x0 = self.image_w
             if y0 < 0:
                 y0 = 0
-            if y0 > self.camera_H:
-                y0 = self.camera_H
+            if y0 > self.image_h:
+                y0 = self.image_h
             y1,x1 = self.roi_points[1]
             if x1 < 0:
                 x1 = 0
-            if x1 > self.camera_W:
-                x1 = self.camera_W
+            if x1 > self.image_w:
+                x1 = self.image_w
             if y1 < 0:
                 y1 = 0
-            if y1 > self.camera_H:
-                y1 = self.camera_H
-            x = int(min(x0, x1))
-            y = int(min(y0, y1))
+            if y1 > self.image_h:
+                y1 = self.image_h
+            x = int(min(x0, x1))+self.image_x
+            y = int(min(y0, y1))+self.image_y
             h = int(abs(y1 - y0))
             w = int(abs(x1 - x0))
             # 确保 x, y, w, h 是偶数
@@ -1791,7 +1910,7 @@ class CameraControlWidget(QWidget):
             self.y.setValue(int(y))
             self.w.setValue(int(w))
             self.h.setValue(int(h))
-            print(f"更新分辨率显示: x={x}, y={y}, w={w}, h={h}")
+            # print(f"更新分辨率显示: x={x}, y={y}, w={w}, h={h}")
 
     def toggle_histogram_display(self, state):
         """切换直方图显示"""
@@ -1807,9 +1926,10 @@ class CameraControlWidget(QWidget):
         green_gain = 1+self.wb_green.value() / self.wb_green.maximum()  # 获取绿色增益
         blue_gain = 1+self.wb_blue.value() / self.wb_blue.maximum()  # 获取蓝色增益
         imgdata_np = self.apply_white_balance_software(self.current_image.copy(),red_gain,green_gain,blue_gain)
-        if self.camera_mode == "单帧模式" and len(self.viewer.layers) > 0 and self.viewer.layers[-1].name.startswith('QHY') and imgdata_np.ndim == self.viewer.layers[-1].data.ndim:
+        if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and len(self.viewer.layers) > 0 and self.viewer.layers[-1].name.startswith('QHY') and imgdata_np.ndim == self.viewer.layers[-1].data.ndim:
             self.viewer.layers[-1].data = imgdata_np
-            self.histogram_widget.update_histogram(imgdata_np)
+            self.img_buffer.put(imgdata_np)
+            self.histogram_widget.update_histogram()
     
     def apply_white_balance_software(self, imgdata_np=None, red_gain=None, green_gain=None, blue_gain=None):
         if imgdata_np is None:
@@ -1832,21 +1952,61 @@ class CameraControlWidget(QWidget):
             imgdata_np[-1] = self._apply_gain_to_image(imgdata_np[-1], red_gain, green_gain, blue_gain)
 
         return imgdata_np  # 返回处理后的图像
-
+    
     def _apply_gain_to_image(self, image, red_gain, green_gain, blue_gain):
-        """应用增益到单帧图像"""
-        if image.dtype == np.uint16:
-            # 处理16位图像
-            image[..., 0] = np.clip(image[..., 0] * red_gain, 0, 65535)  # 红色通道
-            image[..., 1] = np.clip(image[..., 1] * green_gain, 0, 65535)  # 绿色通道
-            image[..., 2] = np.clip(image[..., 2] * blue_gain, 0, 65535)  # 蓝色通道
-        else:
-            # 处理8位图像
-            image[..., 0] = np.clip(image[..., 0] * red_gain, 0, 255)  # 红色通道
-            image[..., 1] = np.clip(image[..., 1] * green_gain, 0, 255)  # 绿色通道
-            image[..., 2] = np.clip(image[..., 2] * blue_gain, 0, 255)  # 蓝色通道
+        """应用增益到单帧图像，优化版本"""
+        # 根据图像的数据类型设置最大值
+        # start_time = time.time()
+        max_value = 65535 if image.dtype == np.uint16 else 255
+        # 将增益转换为字符串键
+        str_red_gain = f"{red_gain:.2f}"
+        str_green_gain = f"{green_gain:.2f}"
+        str_blue_gain = f"{blue_gain:.2f}"
+        # print(f"str_red_gain: {str_red_gain}")
+        # print(f"str_green_gain: {str_green_gain}")
+        # print(f"str_blue_gain: {str_blue_gain}")
+        # print(f"luts keys: {self.luts.keys()}")
+        lut_red = self.luts[max_value][str_red_gain]
+        lut_green = self.luts[max_value][str_green_gain]
+        lut_blue = self.luts[max_value][str_blue_gain]
 
-        return image 
+        # 应用查找表
+        image[:, :, 0] = lut_red[image[:, :, 0]]
+        image[:, :, 1] = lut_green[image[:, :, 1]]
+        image[:, :, 2] = lut_blue[image[:, :, 2]]
+        # print(f"增益处理完成，用时: {time.time() - start_time} 秒")
+        return image    
+    
+    # 生成全局查找表
+    def create_luts(self, max_values, gain_start, gain_end, gain_step):
+        """
+        创建并保存映射表。
+        :param max_values: 像素最大值列表，例如 [255, 65535]
+        :param gain_start: 增益起始值
+        :param gain_end: 增益结束值
+        :param gain_step: 增益步长
+        :return: None
+        """
+        # 使用 np.linspace 确保包括结束值
+        num_steps = int((gain_end - gain_start) / gain_step) + 1
+        gains = np.linspace(gain_start, gain_end, num_steps)
+        
+        luts = {}
+        for max_value in max_values:
+            luts[max_value] = {}
+            for gain in gains:
+                # 四舍五入增益值到合适的小数位数
+                rounded_gain = round(gain, 2)
+                original_values = np.arange(max_value + 1)
+                adjusted_values = np.clip(original_values * rounded_gain, 0, max_value)
+                lut = adjusted_values.astype(np.uint16 if max_value > 255 else np.uint8)
+                # 使用四舍五入后的增益值作为键
+                luts[max_value][f"{rounded_gain:.2f}"] = lut
+
+        self.luts = luts
+        # 保存查找表到文件
+        with open('luts.pkl', 'wb') as f:
+            pickle.dump(luts, f)
     
     def apply_white_balance_hardware(self):
 
@@ -1856,71 +2016,88 @@ class CameraControlWidget(QWidget):
         
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value, red_gain)
         if ret == 0:        
-            print(f"红色增益设置为: {red_gain}")
+            # print(f"红色增益设置为: {red_gain}")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_red_gain_success']}: {red_gain} dB")
         else:
-            print(f"红色增益设置失败！")
+            # print(f"红色增益设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_red_gain_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_red_gain_failed']}: {ret}")
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value, green_gain)
         if ret == 0:
-            print(f"绿色增益设置为: {green_gain}")
+            # print(f"绿色增益设置为: {green_gain}")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_green_gain_success']}: {green_gain} dB")
         else:
-            print(f"绿色增益设置失败！")
+            # print(f"绿色增益设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_green_gain_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_green_gain_failed']}: {ret}")
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value, blue_gain)
         if ret == 0:
-            print(f"蓝色增益设置为: {blue_gain}")
+            # print(f"蓝色增益设置为: {blue_gain}")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_blue_gain_success']}: {blue_gain} dB")
         else:
-            print(f"蓝色增益设置失败！")    
+            # print(f"蓝色增益设置失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_blue_gain_failed']}: {ret}")    
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_blue_gain_failed']}: {ret}")
         return 0
     
     def on_bayer_conversion_changed(self, index):
         self.bayer_conversion = self.bayer_conversion_selector.itemText(index)
-        print(f"选中的 Bayer 类型转换: {self.bayer_conversion}")
+        # print(f"选中的 Bayer 类型转换: {self.bayer_conversion}")
 
     def convert_bayer(self, img, pattern):
-        if img.ndim == 3:
-            return img
-        if pattern == "RGGB":
-            return cv2.cvtColor(img, cv2.COLOR_BAYER_RG2RGB_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_RG2RGB)
-        elif pattern == "BGGR":
-            return cv2.cvtColor(img, cv2.COLOR_BAYER_BG2RGB_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_BG2RGB)
-        elif pattern == "GRBG":
-            return cv2.cvtColor(img, cv2.COLOR_BAYER_GR2RGB_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_GR2RGB)
-        elif pattern == "GBRG":
-            return cv2.cvtColor(img, cv2.COLOR_BAYER_GB2RGB_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_GB2RGB)
-        else:
-            return img
+        if img.ndim == 2:
+            if pattern == "RGGB":
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_BAYER_RG2BGR_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_RG2BGR)
+            elif pattern == "BGGR":
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_BAYER_BG2BGR_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_BG2BGR)
+            elif pattern == "GRBG":
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_BAYER_GR2BGR_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_GR2BGR)
+            elif pattern == "GBRG":
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_BAYER_GB2BGR_EA if img.dtype == np.uint16 else cv2.COLOR_BAYER_GB2BGR)
+            else:
+                return img
+            return img_bgr
+        return img
+        # return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  # 将BGR转换为RGB
 
     def update_current_temperature(self):
         """更新当前温度显示"""
         current_humidity = ctypes.c_double()
         if self.has_temperature_control:
             current_temp = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value)
-            self.current_temperature_label.setText(f'温度: {current_temp:.2f} °C')
+            self.current_temperature_label.setText(f'{translations[self.language]["qhyccd_capture"]["temperature"]}: {current_temp:.2f} °C')
             current_humidity = self.qhyccddll.GetQHYCCDHumidity(self.camhandle,byref(current_humidity))
             if current_humidity > 0:
-                self.current_humidity_label.setText(f'湿度: {current_humidity:.2f} %')
+                self.current_humidity_label.setText(f'{translations[self.language]["qhyccd_capture"]["humidity"]}: {current_humidity:.2f} %')
     
     def update_temperature_setpoint(self, value):
         """更新温度设定点"""
         if self.has_temperature_control:
             ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_COOLER.value, value)
             if ret == 0:
-                print(f"温度设定点设置为: {value} °C")
+                # print(f"温度设定点设置为: {value} °C")
+                self.append_text(f"{translations[self.language]['qhyccd_capture']['set_temperature_success']}: {value} °C")
             else:
-                print(f"温度设定点设置失败！")
+                # print(f"温度设定点设置失败！")
+                warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_temperature_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['set_qhyccd_temperature_failed']}: {ret}")
                 
     def on_CFW_filter_changed(self, index):
         self.CFW_id = self.CFW_filter_selector.itemText(index)
         if self.CFW_id == "None" or self.CFW_id == "" or self.CFW_id == " ":
             return -1
-        print(f"选中的 CFW 滤镜: {self.CFW_id},{self.CFW_number_ids[self.CFW_id]}")
+        # print(f"选中的 CFW 滤镜: {self.CFW_id},{self.CFW_number_ids[self.CFW_id]}")
         # 将字符串转换为字节字符串
         order = self.CFW_number_ids[self.CFW_id].encode('utf-8')
         ret = self.qhyccddll.SendOrder2QHYCCDCFW(self.camhandle, c_char_p(order), len(order))
         if ret == 0:
-            print(f"移动滤镜轮到位置: {self.CFW_id}")
+            # print(f"移动滤镜轮到位置: {self.CFW_id}")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_cfw_filter_success']}: {self.CFW_id}")
         else:
-            print(f"移动滤镜轮失败！")
-        
+            # print(f"移动滤镜轮失败！")
+            warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_cfw_filter_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_cfw_filter_failed']}: {ret}")
+    
     def is_color_camera_by_name(self, camera_name):
         """根据相机名字判断是否是彩色相机"""
         if camera_name and camera_name.split('-')[0].endswith('C'):
@@ -1947,22 +2124,22 @@ class CameraControlWidget(QWidget):
 
     def select_path(self):
         options = QFileDialog.Options()
-        directory = QFileDialog.getExistingDirectory(self, "选择保存路径", options=options)
+        directory = QFileDialog.getExistingDirectory(self, translations[self.language]["qhyccd_capture"]["select_save_path"], options=options)
         if directory:
             self.path_selector.setText(directory)
             
     def on_record_mode_changed(self, index):
         self.record_mode = self.record_mode_selector.itemText(index)
-        print(f"选中的录像模式: {self.record_mode}")
+        # print(f"选中的录像模式: {self.record_mode}")
 
-        if self.record_mode == "时间模式":
+        if self.record_mode == translations[self.language]["qhyccd_capture"]["time_mode"]:
             self.record_time_input.setVisible(True)
             self.record_time_input_label.setVisible(True)
             self.frame_count_input.setVisible(False)
             self.frame_count_input_label.setVisible(False)
             self.layout().removeWidget(self.frame_count_input)  # 从布局中移除
             self.layout().removeWidget(self.frame_count_input_label)  # 从布局中移除
-        elif self.record_mode == "帧数模式":
+        elif self.record_mode == translations[self.language]["qhyccd_capture"]["frame_mode"]:
             self.record_time_input.setVisible(False)
             self.record_time_input_label.setVisible(False)
             self.layout().removeWidget(self.record_time_input)  # 从布局中移除
@@ -1970,7 +2147,7 @@ class CameraControlWidget(QWidget):
             self.frame_count_input.setVisible(True)
             self.frame_count_input_label.setVisible(True)
 
-        elif self.record_mode == "连续模式":
+        elif self.record_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.record_time_input.setVisible(False)
             self.record_time_input_label.setVisible(False)
             self.frame_count_input.setVisible(False)
@@ -1981,13 +2158,15 @@ class CameraControlWidget(QWidget):
             self.layout().removeWidget(self.frame_count_input_label)  # 从布局中移除
 
     def start_recording(self):
+        self.append_text(translations[self.language]["qhyccd_capture"]["start_recording"])
         self.record_button.setEnabled(False)
         self.is_recording = True
         self.save_progress_indicator.setVisible(True)
-        self.save_progress_indicator.setText("保存中...")
+        self.save_progress_indicator.setText(translations[self.language]["qhyccd_capture"]["saving"])
         
     def on_save_thread_finished(self):
-        self.save_progress_indicator.setText("保存完成")
+        self.save_progress_indicator.setText(translations[self.language]["qhyccd_capture"]["save_completed"])
+        self.append_text(translations[self.language]["qhyccd_capture"]["recording_completed"])
 
     def stop_recording(self):
         self.is_recording = False
@@ -1998,15 +2177,29 @@ class CameraControlWidget(QWidget):
         self.frame_count_input.setEnabled(True)
         self.record_mode_selector.setEnabled(True)
         self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)  # 重置进度条
+        self.progress_bar.setValue(0)  # 重置进度条
+        self.append_text(translations[self.language]["qhyccd_capture"]["stop_recording"])
 
     def start_preview(self):
         if self.preview_thread is None:
             ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle)
-            print("BeginQHYCCDLive() ret =", ret)
+            if ret != 0:
+                warnings.warn(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+                
+            # 根据位深和颜色模式确定数据类型和大小
+            dtype_code = 'H' if self.camera_bit == 16 else 'B'  # 'H' 对应 ctypes.c_uint16，'B' 对应 ctypes.c_ubyte
+            
+            if self.is_color_camera and self.Debayer_mode:
+                channels = 3
+            else:
+                channels = 1
+            
+            # 创建共享内存
+            self.shared_image_data = Array(dtype_code, self.image_w * self.image_h * channels , lock=False)
+            
             self.preview_thread = PreviewThread(
                 self.camhandle, self.qhyccddll, self.image_w, self.image_h, self.camera_bit, self.is_color_camera, 
-                self.bayer_conversion, self.viewer
+                self.Debayer_mode, self.viewer,self.shared_image_data
             )
             self.preview_thread.frame_captured.connect(self.data_received)  # 连接信号到槽函数
             self.preview_thread.start()
@@ -2015,22 +2208,34 @@ class CameraControlWidget(QWidget):
     def stop_preview(self):
         if self.preview_thread is not None:
             ret = self.qhyccddll.StopQHYCCDLive(self.camhandle)
-            print("StopQHYCCDLive() ret =", ret)
+            if ret != 0:
+                warnings.warn(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
             self.preview_thread.stop()
             self.preview_checkbox.setChecked(False)
             self.preview_thread = None
+        if 'QHY-Preview' in self.viewer.layers:
+            self.viewer.layers.remove('QHY-Preview')
         
-    def data_received(self, imgdata_np, fps):
-        if self.top_checkbox.isChecked():
-            self.contrast_limits_name = 'QHY-Preview'
-        
+    def data_received(self, fps):
+        with self.lock:
+            if self.top_checkbox.isChecked():
+                self.contrast_limits_name = 'QHY-Preview'
+            dtype = np.uint16 if self.camera_bit == 16 else np.uint8
+            shape = (self.image_h, self.image_w, 3) if self.is_color_camera and self.Debayer_mode  else (self.image_h, self.image_w)
+            imgdata_np = np.frombuffer(self.shared_image_data, dtype=dtype).reshape(shape)
+        if imgdata_np is None:
+            return
         
         # 传输数据到保存
         if self.is_recording:
+            # 应用 Bayer 转换
+            if self.is_color_camera and self.bayer_conversion != "None":
+                # print(f"经过convert_bayer() imgdata_np.shape: {imgdata_np.shape}")
+                imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
             if self.save_thread is None:
                 self.buffer_queue = queue.Queue()
                 # 创建并启动保存线程
-                self.save_thread = SaveThread(self.buffer_queue, self.path_selector.text(), self.record_file_name.text(), self.save_format_selector.currentText(), self.save_mode, int(fps))
+                self.save_thread = SaveThread(self.buffer_queue, self.path_selector.text(), self.record_file_name.text(), self.save_format_selector.currentText(), self.save_mode, int(fps),self.language)
                 self.save_thread.finished.connect(self.on_save_thread_finished)  # 连接信号
                 self.save_thread.start()
                 self.record_time_input.setEnabled(False)
@@ -2042,7 +2247,7 @@ class CameraControlWidget(QWidget):
                 self.progress_bar.setTextVisible(True)
                 self.progress_bar.setStyleSheet("")  # 还原颜色
 
-            if self.record_mode == "时间模式":
+            if self.record_mode == translations[self.language]["qhyccd_capture"]["time_mode"]:
                 if self.start_save_time is None:
                     self.record_time_input.setEnabled(False)
                     self.record_mode_selector.setEnabled(False)
@@ -2066,7 +2271,7 @@ class CameraControlWidget(QWidget):
                     self.record_mode_selector.setEnabled(True)
                     self.progress_bar.setValue(0)  # 重置进度条
                     
-            elif self.record_mode == "帧数模式":
+            elif self.record_mode == translations[self.language]["qhyccd_capture"]["frame_mode"]:
                 self.buffer_queue.put(imgdata_np)
                 self.record_frame_count += 1
                 total_frames = self.frame_count_input.value()  # 获取总帧数
@@ -2084,36 +2289,27 @@ class CameraControlWidget(QWidget):
                     self.frame_count_input.setEnabled(True)
                     self.record_mode_selector.setEnabled(True)
                     self.progress_bar.setValue(0)  # 重置进度条
-            elif self.record_mode == "连续模式":
+            elif self.record_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
                 self.buffer_queue.put(imgdata_np)
                 # 进度条循环
                 self.progress_bar.setRange(0, 0)
-                # self.progress_bar.setValue((self.progress_bar.value() + 1) % 100)  # 循环更新进度条
-                # self.progress_bar.setTextVisible(False)
-        
-            else:
-                print("未选择录像模式！")
                 
         # 获取当前时间
         current_time = time.time()
         
-        # 应用 Bayer 转换
-        if self.is_color_camera and self.bayer_conversion != "None":
-            # print(f"经过convert_bayer() imgdata_np.shape: {imgdata_np.shape}")
-            imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
-        
         # 传输数据到画布显示，限制最高帧率为30fps   
         if self.last_update_time is not None and current_time - self.last_update_time < 1/30:
-            pass
+            return
         else:   
+            if self.is_color_camera and self.bayer_conversion != "None":
+                imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
             self.update_viewer(imgdata_np, fps)
             self.last_update_time = current_time
             
         if (self.last_histogram_update_time is None or current_time - self.last_histogram_update_time > 1) and self.top_checkbox.isChecked():
-            # self.histogram_widget.show_widget()
-            self.histogram_widget.update_histogram(imgdata_np)
+            self.img_buffer.put(imgdata_np)
+            self.histogram_widget.update_histogram()
             self.last_histogram_update_time = current_time
-            # self.show_histogram_checkbox.setChecked(True)
 
     def update_viewer(self, imgdata_np, fps):
         layer_name = 'QHY-Preview'
@@ -2134,13 +2330,14 @@ class CameraControlWidget(QWidget):
         text_position = (img_with_fps.shape[1] - 150, 30)  # 右上角
 
         # 创建半透明背景
-        overlay = img_with_fps.copy()
+        overlay = imgdata_np.copy()
+        max_value = 65535 if img_with_fps.dtype == np.uint16 else 255
         cv2.rectangle(overlay, (text_position[0] - 10, text_position[1] - 30), 
                                 (text_position[0] + 140, text_position[1] + 10), 
                                 (0, 0, 0), -1)  # 黑色背景
 
         # 计算对比色
-        contrast_color = (255, 255, 255)  # 白色文本
+        contrast_color = (max_value, max_value, max_value)  # 白色文本
 
         # 在图像上绘制 FPS
         cv2.putText(overlay, f'FPS: {fps:.2f}', text_position, 
@@ -2157,15 +2354,7 @@ class CameraControlWidget(QWidget):
                 self.viewer.add_image(img_with_fps, name=layer_name)
         else:
             self.viewer.add_image(img_with_fps, name=layer_name)
-            
-        # 设置分辨率显示大小占图像的1/100
-        resolution_text = f'Resolution: {img_with_fps.shape[1]}x{img_with_fps.shape[0]}'
-        resolution_position = (10, img_with_fps.shape[0] - 10)  # 左下角
-
-        # 在图像上绘制分辨率
-        cv2.putText(img_with_fps, resolution_text, resolution_position, 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.01 * img_with_fps.shape[0] / 100, contrast_color, 1, cv2.LINE_AA)
-
+        # print(f"layer_name: {layer_name}")
         # 如果需要将图层移动到顶部，可以使用以下方法
         if self.top_checkbox.isChecked():  # 检查复选框状态
             layer_index = self.viewer.layers.index(layer_name)  # 获取图层的索引
@@ -2181,10 +2370,11 @@ class CameraControlWidget(QWidget):
             print(f"Error connecting contrast limits event: {e}")
 
     def on_contrast_limits_change(self, event):
-        # 当对比度限制变化时触发的函数
-        contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
-        # print(f"contrast_limit: {contrast_limits}")
-        self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
+        if self.contrast_limits_name in self.viewer.layers:
+            # 当对比度限制变化时触发的函数
+            contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
+            # print(f"contrast_limit: {contrast_limits}")
+            self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
 
         
 @napari_hook_implementation

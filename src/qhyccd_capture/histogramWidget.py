@@ -4,11 +4,19 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout  # 导入 QWidget 和 QVBoxLayo
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari import Viewer  # 导入 Viewer
 from napari.layers import Image  # 导入 Image 层
+from .language import translations
+from scipy.ndimage import gaussian_filter
+import threading
 
 class HistogramWidget(QWidget):  # 保持类名不变
-    def __init__(self, viewer: Viewer):  # 添加 viewer 参数
+    def __init__(self, viewer: Viewer, img_buffer, language: str):  # 添加 viewer 参数
         super().__init__()
-        self.setWindowTitle("Histogram")  # 设置窗口标题
+        
+        self.viewer = viewer
+        self.img_buffer = img_buffer
+        self.language = language
+        
+        self.setWindowTitle(translations[self.language]["histogramWidget"]["histogram"])  # 设置窗口标题
 
         self.layout = QVBoxLayout()
         self.canvas = FigureCanvas(plt.figure())
@@ -24,7 +32,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
         self.canvas.draw()  # 更新画布
 
         # 将部件添加到 Napari 窗口的左侧  {{ edit_2 }}
-        viewer.window.add_dock_widget(self, area='left', name='Histogram')
+        self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
 
         # Initialize histogram and lines
         self.histogram = None
@@ -35,63 +43,81 @@ class HistogramWidget(QWidget):  # 保持类名不变
 
     def show_widget(self):  # 新增方法
         """显示 HistogramWidget 窗口"""
-        print("show_widget")
+        if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
+            self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
         self.show()  # 显示窗口
         self.canvas.show()  # 显示画布  {{ edit_1 }}
 
     def hide_widget(self):  # 新增方法
         """隐藏 HistogramWidget 窗口"""
-        print("hide_widget")
+        # print("hide_widget")
         self.hide()  # 隐藏窗口
         self.canvas.hide()  # 隐藏画布  {{ edit_2 }}
 
-    def update_histogram(self, img):
-        """Update histogram"""
-        # 清除当前直方图线
+    def update_histogram(self):
+        """Update histogram with optimized drawing in a separate thread to avoid UI freeze."""
+        thread = threading.Thread(target=self._update_histogram_thread)
+        thread.start()
+
+    def _update_histogram_thread(self):
+        """Threaded function to perform heavy lifting of histogram update."""
+        imgdata_np = self.img_buffer.get()
+        if imgdata_np is None:
+            return
+        
+        if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
+            # 如果不在，则重新添加到 viewer 的 dock widget
+            self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
+
+        # 清除当前直方图线和图例
         if self.histogram is not None:
             if isinstance(self.histogram, list):  # 如果是列表，移除所有线
                 for line in self.histogram:
-                    line.remove()
+                    if line.figure is not None:  # 检查线条是否仍在图中
+                        line.remove()
             else:
-                self.histogram.remove()  # 移除之前的直方图线
+                if self.histogram.figure is not None:  # 检查线条是否仍在图中
+                    self.histogram.remove()
+        self.ax.legend().remove()  # 移除现有的图例
 
-        # 计算直方图
-        if img.ndim == 2:  # 灰度图像
-            if img.dtype == np.uint8:  # 8位图像
-                histogram, bins = np.histogram(img.flatten(), bins=256, range=[0, 256])
-                plt.xlim([0, 255])
-            elif img.dtype == np.uint16:  # 16位图像
-                histogram, bins = np.histogram(img.flatten(), bins=65536, range=[0, 65536])
-                plt.xlim([0, 65535])
-            else:
-                raise ValueError("Unsupported image depth for grayscale")
+        max_value = 0
+        
+        # 使用NumPy的向量化操作计算直方图
+        mask = imgdata_np > 0
+        if imgdata_np.dtype == np.uint16:
+            bins_range = (1, imgdata_np.max())
+            bins_number = 65535
+        else:
+            bins_range = (1, 255)
+            bins_number = 256
 
-            # 绘制新的直方图
-            self.histogram, = plt.plot(bins[:-1], histogram, color='black')  # 更新直方图引用
-
+        if imgdata_np.ndim == 2:  # 灰度图像
+            histogram, bins = np.histogram(imgdata_np[mask].flatten(), bins=bins_number, range=bins_range)
+            smoothed_histogram = gaussian_filter(histogram, sigma=2)  # 使用高斯滤波平滑数据
+            self.histogram, = self.ax.plot(bins[:-1], smoothed_histogram, color='black', label="Gray Level Distribution")
+            if smoothed_histogram.max() > max_value:
+                max_value = smoothed_histogram.max()
+            # print(f"histogram: {histogram}")
         else:  # 彩色图像
             colors = ('r', 'g', 'b')
-            self.histogram = []  # 初始化为列表以存储每个通道的直方图
+            self.histogram = []
             for i, color in enumerate(colors):
-                if img.dtype == np.uint8:  # 8位图像
-                    histogram, bins = np.histogram(img[:, :, i].flatten(), bins=256, range=[0, 256])
-                    plt.xlim([0, 255])
-                elif img.dtype == np.uint16:  # 16位图像
-                    histogram, bins = np.histogram(img[:, :, i].flatten(), bins=65536, range=[0, 65536])
-                    plt.xlim([0, 65535])
-                else:
-                    raise ValueError("Unsupported image depth for color")
+                channel_histogram, bins = np.histogram(imgdata_np[:, :, i][mask[:, :, i]].flatten(), bins=bins_number, range=bins_range)
+                smoothed_histogram = gaussian_filter(channel_histogram, sigma=2)  # 使用高斯滤波平滑数据
+                line, = self.ax.plot(bins[:-1], channel_histogram, color=color, label=f'{color.upper()} Channel')
+                self.histogram.append(line)
+                smoothed_histogram_max = smoothed_histogram[:50000].max()
+                if smoothed_histogram_max > max_value:
+                    max_value = smoothed_histogram_max
+        self.ax.set_xlim(bins_range)
+        self.ax.set_ylim(0, int(max_value))
 
-                # 绘制每个通道的直方图
-                line, = plt.plot(bins[:-1], histogram, color=color, label=f'{color.upper()} Channel')
-                self.histogram.append(line)  # 将每个通道的直方图线添加到列表中
+        # 添加图例，仅当不存在时
+        if not self.ax.get_legend():
+            self.ax.legend()
 
-        # 更新画布
-        if not self.canvas.isVisible():
-            self.canvas.show()
-        if any(artist.get_label() for artist in plt.gca().get_lines()):
-            plt.legend()
-        self.canvas.draw()  # Update drawing
+        # Ensure GUI updates are done in the main thread
+        self.canvas.draw_idle()
 
     def update_min_max_lines(self, min_value, max_value):
         """Update min and max lines"""
@@ -107,4 +133,4 @@ class HistogramWidget(QWidget):  # 保持类名不变
 
         # 更新画布
         plt.legend()
-        self.canvas.draw()  # Update drawing
+        self.canvas.draw_idle()  # Update drawing

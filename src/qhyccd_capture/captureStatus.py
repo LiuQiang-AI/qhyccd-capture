@@ -1,12 +1,13 @@
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 import time
-
+from .language import translations
 class CaptureStatusThread(QThread):
     update_status = pyqtSignal(str)
     end_capture = pyqtSignal()
 
-    def __init__(self, qhyccddll, camhandle):
+    def __init__(self, qhyccddll, camhandle,language):
         super().__init__()
+        self.language = language
         self.qhyccddll = qhyccddll
         self.camhandle = camhandle
         self.running = True
@@ -15,7 +16,7 @@ class CaptureStatusThread(QThread):
         self.time = 0
 
     def run(self):
-        status_texts = ['拍摄中.. ', '拍摄中.  ', '拍摄中...']
+        status_texts = [translations[self.language]["captureStatus"]["capturing"], translations[self.language]["captureStatus"]["capturing_1"], translations[self.language]["captureStatus"]["capturing_2"]]
         index = 0
         paused_signal_sent = False  # 添加标志位
         while self.running:
@@ -28,7 +29,7 @@ class CaptureStatusThread(QThread):
                 if elapsed_time == -1:
                     elapsed_time = 0
                 # 发送状态文本和耗时
-                self.update_status.emit(f"{status_texts[index]} 曝光: {elapsed_time}")
+                self.update_status.emit(f"{status_texts[index]} {translations[self.language]['captureStatus']['exposure']}: {elapsed_time}")
                 index = (index + 1) % len(status_texts)
             else:
                 if not paused_signal_sent:  # 仅在第一次暂停时发送信号
