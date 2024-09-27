@@ -44,7 +44,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
         self.update_lock = threading.Lock()  # 添加一个线程锁
 
     def show_widget(self):  # 新增方法
-        """显示 HistogramWidget 窗��"""
+        """显示 HistogramWidget 窗"""
         if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
             self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
         self.show()  # 显示窗口
@@ -58,12 +58,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
 
     def update_histogram(self):
         """Update histogram with optimized drawing in a separate thread to avoid UI freeze."""
-        if not self.update_lock.locked():  # 检查锁是否已被占用
-            thread = threading.Thread(target=self._update_histogram_thread)
-            thread.start()
 
-    def _update_histogram_thread(self):
-        """Threaded function to perform heavy lifting of histogram update."""
         with self.update_lock:  # 使用锁来确保只有一个线程可以执行以下代码
             imgdata_np = self.img_buffer.get()
             if imgdata_np is None:
@@ -84,12 +79,15 @@ class HistogramWidget(QWidget):  # 保持类名不变
                         self.histogram.remove()
             self.ax.legend().remove()  # 移除现有的图例
 
-            max_value = 0
-            
+            max_value = imgdata_np.max()
+            if max_value == 0:
+                # 如果最大值为0，说明图像全为零，可以跳过更新或设置默认范围
+                return  # 或者 bins_range = (0, 1) 等其他逻辑处理
+
             # 使用NumPy的向量化操作计算直方图
             mask = imgdata_np > 0
             if imgdata_np.dtype == np.uint16:
-                bins_range = (1, imgdata_np.max())
+                bins_range = (1, max_value)
                 bins_number = 65535
             else:
                 bins_range = (1, 255)

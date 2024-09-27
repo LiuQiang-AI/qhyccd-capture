@@ -1098,6 +1098,7 @@ class CameraControlWidget(QWidget):
             wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBR.value)
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+                self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value, (max_data-min_data)//2)
                 self.wb_red.setRange(int(-100), int(100))
                 self.wb_red.setSingleStep(int(1))
                 self.wb_red.setValue(int(0))
@@ -1118,6 +1119,7 @@ class CameraControlWidget(QWidget):
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBG.value)
             # print(f"wb_green:{wb_green},min_data:{min_data},max_data:{max_data},step:{step}")
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+                self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value, (max_data-min_data)//2)
                 self.wb_green.setRange(int(-100), int(100))
                 self.wb_green.setSingleStep(int(1))
                 self.wb_green.setValue(int(0))
@@ -1138,6 +1140,7 @@ class CameraControlWidget(QWidget):
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBB.value)
             # print(f"wb_blue:{wb_blue},min_data:{min_data},max_data:{max_data},step:{step}")
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
+                self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value, (max_data-min_data)//2)
                 self.wb_blue.setRange(int(-100), int(100))
                 self.wb_blue.setSingleStep(int(1))
                 self.wb_blue.setValue(int(0))
@@ -1418,17 +1421,18 @@ class CameraControlWidget(QWidget):
     def on_set_original_resolution_clicked(self):
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is not None:
             self.stop_preview()
+            
+        self.image_w = self.camera_W//self.camera_pixel_bin[self.pixel_bin_selector.currentText()][0]
+        self.image_h = self.camera_H//self.camera_pixel_bin[self.pixel_bin_selector.currentText()][1]
+        self.image_x = 0
+        self.image_y = 0
         # 设置相机分辨率为图像的宽度和高度
-        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, 0, 0,self.camera_W , self.camera_H)
+        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, self.image_x, self.image_y,self.image_w , self.image_h)
         if ret == -1:
             # print(f"分辨率设置失败!")
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
         # print(f"还原分辨率设置为: ({0},{0}) --> ({self.camera_W},{self.camera_H})")
-        self.image_w = self.camera_W
-        self.image_h = self.camera_H
-        self.image_x = 0
-        self.image_y = 0
         self.x.setValue(0)
         self.y.setValue(0)
         self.w.setValue(self.image_w)
@@ -1540,10 +1544,12 @@ class CameraControlWidget(QWidget):
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
             return -1
         self.bin = self.camera_pixel_bin[bin_size]
+        self.image_x = 0
+        self.image_y = 0
         self.image_w = int(self.camera_W/self.camera_pixel_bin[bin_size][0])
         self.image_h = int(self.camera_H/self.camera_pixel_bin[bin_size][1])
         # print("SetQHYCCDBinMode() ret =", ret)
-        self.update_resolution(0,0,self.image_w,self.image_h)
+        self.update_resolution(self.image_x,self.image_y,self.image_w,self.image_h)
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.start_preview()
         # self.update_camera_config()
@@ -1650,6 +1656,10 @@ class CameraControlWidget(QWidget):
             self.current_image = imgdata_np
             self.current_image_name = f'{camera_name}-{current_time}'
             self.viewer.add_image(self.current_image, name=self.current_image_name)
+            if self.camera_bit == 16:
+                self.viewer.layers[self.current_image_name].contrast_limits = (0, 65535)
+            else:
+                self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
@@ -1666,6 +1676,10 @@ class CameraControlWidget(QWidget):
                 if self.current_image_name in self.viewer.layers:
                     self.viewer.layers.pop(self.current_image_name)
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
+                if self.camera_bit == 16:
+                    self.viewer.layers[self.current_image_name].contrast_limits = (0, 65535)
+                else:
+                    self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
             # 确保图像在最上层
             self.viewer.layers.selection.active = self.viewer.layers[self.current_image_name]
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
@@ -1694,6 +1708,10 @@ class CameraControlWidget(QWidget):
                 self.viewer.layers[self.current_image_name].data = self.current_image
             else:
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
+                if self.camera_bit == 16:
+                    self.viewer.layers[self.current_image_name].contrast_limits = (0, 65535)
+                else:
+                    self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
             
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and self.is_color_camera:
                 # print("单帧模式")
@@ -1944,11 +1962,11 @@ class CameraControlWidget(QWidget):
             blue_gain = 1 + self.wb_blue.value() / self.wb_blue.maximum()  # 获取蓝色增益
 
         # 处理单帧图像
-        if self.is_color_camera and imgdata_np.ndim == 3 and imgdata_np.shape[2] == 3:
+        if self.is_color_camera and imgdata_np.ndim == 3 and imgdata_np.shape[-1] == 3:
             imgdata_np = self._apply_gain_to_image(imgdata_np, red_gain, green_gain, blue_gain)
 
         # 处理序列图像
-        elif self.is_color_camera and imgdata_np.ndim == 4 and imgdata_np.shape[3] == 3:
+        elif self.is_color_camera and imgdata_np.ndim == 4 and imgdata_np.shape[-1] == 3:
             imgdata_np[-1] = self._apply_gain_to_image(imgdata_np[-1], red_gain, green_gain, blue_gain)
 
         return imgdata_np  # 返回处理后的图像
@@ -2352,8 +2370,16 @@ class CameraControlWidget(QWidget):
             else:
                 self.viewer.layers.remove(layer_name)
                 self.viewer.add_image(img_with_fps, name=layer_name)
+                if self.camera_bit == 16:
+                    self.viewer.layers[layer_name].contrast_limits = (0, 65535)
+                else:
+                    self.viewer.layers[layer_name].contrast_limits = (0, 255)
         else:
             self.viewer.add_image(img_with_fps, name=layer_name)
+            if self.camera_bit == 16:
+                self.viewer.layers[layer_name].contrast_limits = (0, 65535)
+            else:
+                self.viewer.layers[layer_name].contrast_limits = (0, 255)
         # print(f"layer_name: {layer_name}")
         # 如果需要将图层移动到顶部，可以使用以下方法
         if self.top_checkbox.isChecked():  # 检查复选框状态
@@ -2363,6 +2389,7 @@ class CameraControlWidget(QWidget):
 
     def bind_contrast_limits_event(self):
         # 绑定当前图层的对比度限制变化事件
+        
         current_layer = self.viewer.layers[self.contrast_limits_name]
         try:
             self.contrast_limits_connection = current_layer.events.contrast_limits.connect(self.on_contrast_limits_change)
