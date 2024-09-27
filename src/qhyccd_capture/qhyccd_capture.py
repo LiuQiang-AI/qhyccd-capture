@@ -1920,7 +1920,7 @@ class CameraControlWidget(QWidget):
             self.histogram_widget.hide_widget()  # 隐藏直方图窗口
                    
     def on_set_white_balance_clicked(self):
-        if self.current_image is None:
+        if self.current_image is None or self.current_image.ndim != 3 or self.current_image.shape[2] == 1:
             return
         red_gain = 1+self.wb_red.value()/ self.wb_red.maximum() # 获取红色增益
         green_gain = 1+self.wb_green.value() / self.wb_green.maximum()  # 获取绿色增益

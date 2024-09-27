@@ -41,8 +41,10 @@ class HistogramWidget(QWidget):  # 保持类名不变
 
         self.hide()  # Initialize hidden window
 
+        self.update_lock = threading.Lock()  # 添加一个线程锁
+
     def show_widget(self):  # 新增方法
-        """显示 HistogramWidget 窗口"""
+        """显示 HistogramWidget 窗��"""
         if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
             self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
         self.show()  # 显示窗口
@@ -56,68 +58,72 @@ class HistogramWidget(QWidget):  # 保持类名不变
 
     def update_histogram(self):
         """Update histogram with optimized drawing in a separate thread to avoid UI freeze."""
-        thread = threading.Thread(target=self._update_histogram_thread)
-        thread.start()
+        if not self.update_lock.locked():  # 检查锁是否已被占用
+            thread = threading.Thread(target=self._update_histogram_thread)
+            thread.start()
 
     def _update_histogram_thread(self):
         """Threaded function to perform heavy lifting of histogram update."""
-        imgdata_np = self.img_buffer.get()
-        if imgdata_np is None:
-            return
-        
-        if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
-            # 如果不在，则重新添加到 viewer 的 dock widget
-            self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
+        with self.update_lock:  # 使用锁来确保只有一个线程可以执行以下代码
+            imgdata_np = self.img_buffer.get()
+            if imgdata_np is None:
+                return
+            
+            if translations[self.language]["histogramWidget"]["histogram"] not in [name for name in self.viewer.window._dock_widgets]:
+                # 如果不在，则重新添加到 viewer 的 dock widget
+                self.viewer.window.add_dock_widget(self, area='left', name=translations[self.language]["histogramWidget"]["histogram"])
 
-        # 清除当前直方图线和图例
-        if self.histogram is not None:
-            if isinstance(self.histogram, list):  # 如果是列表，移除所有线
-                for line in self.histogram:
-                    if line.figure is not None:  # 检查线条是否仍在图中
-                        line.remove()
+            # 清除当前直方图线和图例
+            if self.histogram is not None:
+                if isinstance(self.histogram, list):  # 如果是列表，移除所有线
+                    for line in self.histogram:
+                        if line.figure is not None:  # 检查线条是否仍在图中
+                            line.remove()
+                else:
+                    if self.histogram.figure is not None:  # 检查线条是否仍在图中
+                        self.histogram.remove()
+            self.ax.legend().remove()  # 移除现有的图例
+
+            max_value = 0
+            
+            # 使用NumPy的向量化操作计算直方图
+            mask = imgdata_np > 0
+            if imgdata_np.dtype == np.uint16:
+                bins_range = (1, imgdata_np.max())
+                bins_number = 65535
             else:
-                if self.histogram.figure is not None:  # 检查线条是否仍在图中
-                    self.histogram.remove()
-        self.ax.legend().remove()  # 移除现有的图例
+                bins_range = (1, 255)
+                bins_number = 256
 
-        max_value = 0
-        
-        # 使用NumPy的向量化操作计算直方图
-        mask = imgdata_np > 0
-        if imgdata_np.dtype == np.uint16:
-            bins_range = (1, imgdata_np.max())
-            bins_number = 65535
-        else:
-            bins_range = (1, 255)
-            bins_number = 256
+            if imgdata_np.ndim == 2:  # 灰度图像
+                histogram, bins = np.histogram(imgdata_np[mask].flatten(), bins=bins_number, range=bins_range)
+                smoothed_histogram = gaussian_filter(histogram, sigma=2)  # 使用高斯滤波平滑数据
+                valid_indices = smoothed_histogram > 0  # 获取非零值的索引
+                self.histogram, = self.ax.plot(bins[:-1][valid_indices], smoothed_histogram[valid_indices], color='black', label="Gray Level Distribution")
+                if smoothed_histogram.max() > max_value:
+                    max_value = smoothed_histogram.max()
+                # print(f"histogram: {histogram}")
+            else:  # 彩色图像
+                colors = ('r', 'g', 'b')
+                self.histogram = []
+                for i, color in enumerate(colors):
+                    channel_histogram, bins = np.histogram(imgdata_np[:, :, i][mask[:, :, i]].flatten(), bins=bins_number, range=bins_range)
+                    smoothed_histogram = gaussian_filter(channel_histogram, sigma=2)  # 使用高斯滤波平滑数据
+                    valid_indices = smoothed_histogram > 0  # 获取非零值的索引
+                    line, = self.ax.plot(bins[:-1][valid_indices], smoothed_histogram[valid_indices], color=color, label=f'{color.upper()} Channel')
+                    self.histogram.append(line)
+                    smoothed_histogram_max = smoothed_histogram[:50000].max()
+                    if smoothed_histogram_max > max_value:
+                        max_value = smoothed_histogram_max
+            self.ax.set_xlim(bins_range)
+            self.ax.set_ylim(0, int(max_value))
 
-        if imgdata_np.ndim == 2:  # 灰度图像
-            histogram, bins = np.histogram(imgdata_np[mask].flatten(), bins=bins_number, range=bins_range)
-            smoothed_histogram = gaussian_filter(histogram, sigma=2)  # 使用高斯滤波平滑数据
-            self.histogram, = self.ax.plot(bins[:-1], smoothed_histogram, color='black', label="Gray Level Distribution")
-            if smoothed_histogram.max() > max_value:
-                max_value = smoothed_histogram.max()
-            # print(f"histogram: {histogram}")
-        else:  # 彩色图像
-            colors = ('r', 'g', 'b')
-            self.histogram = []
-            for i, color in enumerate(colors):
-                channel_histogram, bins = np.histogram(imgdata_np[:, :, i][mask[:, :, i]].flatten(), bins=bins_number, range=bins_range)
-                smoothed_histogram = gaussian_filter(channel_histogram, sigma=2)  # 使用高斯滤波平滑数据
-                line, = self.ax.plot(bins[:-1], channel_histogram, color=color, label=f'{color.upper()} Channel')
-                self.histogram.append(line)
-                smoothed_histogram_max = smoothed_histogram[:50000].max()
-                if smoothed_histogram_max > max_value:
-                    max_value = smoothed_histogram_max
-        self.ax.set_xlim(bins_range)
-        self.ax.set_ylim(0, int(max_value))
+            # 添加图例，仅当不存在时
+            if not self.ax.get_legend():
+                self.ax.legend()
 
-        # 添加图例，仅当不存在时
-        if not self.ax.get_legend():
-            self.ax.legend()
-
-        # Ensure GUI updates are done in the main thread
-        self.canvas.draw_idle()
+            # Ensure GUI updates are done in the main thread
+            self.canvas.draw_idle()
 
     def update_min_max_lines(self, min_value, max_value):
         """Update min and max lines"""
