@@ -637,6 +637,8 @@ class CameraControlWidget(QWidget):
     def append_text(self, text):
         # 向 QTextEdit 添加文本
         self.state_label.append(text)
+        now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{now_time}: {text}")
         # # 自动滚动到底部
 
         self.state_label.moveCursor(QTextCursor.End)
@@ -1601,6 +1603,10 @@ class CameraControlWidget(QWidget):
         self.Debayer_mode = self.camera_Debayer_mode[mode]
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.stop_preview()
+            self.on_set_original_resolution_clicked()
+            self.set_original_resolution_button.setEnabled(not self.camera_Debayer_mode[mode])
+            self.set_resolution_button.setEnabled(not self.camera_Debayer_mode[mode])
+            self.show_roi_button.setEnabled(not self.camera_Debayer_mode[mode])
         ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, self.camera_Debayer_mode[mode])
         if ret == -1:
             # print(f"Debayer模式{mode}设置失败!")
@@ -1968,6 +1974,7 @@ class CameraControlWidget(QWidget):
         # 处理序列图像
         elif self.is_color_camera and imgdata_np.ndim == 4 and imgdata_np.shape[-1] == 3:
             imgdata_np[-1] = self._apply_gain_to_image(imgdata_np[-1], red_gain, green_gain, blue_gain)
+            self.current_image[-1] = imgdata_np[-1]
 
         return imgdata_np  # 返回处理后的图像
     
@@ -2332,7 +2339,6 @@ class CameraControlWidget(QWidget):
     def update_viewer(self, imgdata_np, fps):
         layer_name = 'QHY-Preview'
         
-        # self.current_image = imgdata_np
         self.preview_image = imgdata_np
         if not self.preview_status:
             if layer_name in self.viewer.layers:
@@ -2341,29 +2347,33 @@ class CameraControlWidget(QWidget):
 
         self.fps_label.setText(f'FPS: {fps:.2f}')
         
-        # 在图像上绘制帧率
-        img_with_fps = imgdata_np.copy()
+        if imgdata_np.shape[1] > 1000:
+            img_with_fps = imgdata_np.copy()
+            
+            # 设置文本位置
+            text_position = (img_with_fps.shape[1] - int(img_with_fps.shape[1] / 100 * 15), int(img_with_fps.shape[0] / 100 * 3))
+            
+            # 创建半透明背景
+            overlay = imgdata_np.copy()
+            max_value = 65535 if img_with_fps.dtype == np.uint16 else 255
+            text = f'FPS: {fps:.2f}'
+            font_scale = 0.7 * (img_with_fps.shape[1] / 1000)
+            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)
+            cv2.rectangle(overlay, 
+                          (text_position[0] - 10, text_position[1] - text_height - 10), 
+                          (text_position[0] + text_width + 10, text_position[1] + 10), 
+                          (0, 0, 0), -1)  # 黑色背景
+
+            # 在图像上绘制 FPS
+            contrast_color = (max_value, max_value, max_value)  # 白色文本
+            cv2.putText(overlay, text, text_position, 
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, contrast_color, 2, cv2.LINE_AA)
+
+            # 将半透明背景叠加到原图像上
+            cv2.addWeighted(overlay, 0.5, img_with_fps, 0.5, 0, img_with_fps)
+        else:
+            img_with_fps = imgdata_np
         
-        # 设置文本位置
-        text_position = (img_with_fps.shape[1] - 150, 30)  # 右上角
-
-        # 创建半透明背景
-        overlay = imgdata_np.copy()
-        max_value = 65535 if img_with_fps.dtype == np.uint16 else 255
-        cv2.rectangle(overlay, (text_position[0] - 10, text_position[1] - 30), 
-                                (text_position[0] + 140, text_position[1] + 10), 
-                                (0, 0, 0), -1)  # 黑色背景
-
-        # 计算对比色
-        contrast_color = (max_value, max_value, max_value)  # 白色文本
-
-        # 在图像上绘制 FPS
-        cv2.putText(overlay, f'FPS: {fps:.2f}', text_position, 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, contrast_color, 2, cv2.LINE_AA)
-
-        # 将半透明背景叠加到原图像上
-        cv2.addWeighted(overlay, 0.5, img_with_fps, 0.5, 0, img_with_fps)
-
         if layer_name in self.viewer.layers:
             if self.viewer.layers[layer_name].data.shape == img_with_fps.shape:
                 self.viewer.layers[layer_name].data = img_with_fps
