@@ -1,0 +1,148 @@
+{
+    "LQ": {
+        "SIMPLE": {
+            "value": "T",
+            "description": "\u7b26\u5408FITS\u6807\u51c6"
+        },
+        "BITPIX": {
+            "value": "uint8",
+            "description": "\u6570\u7ec4\u6570\u636e\u7c7b\u578b"
+        },
+        "NAXIS": {
+            "value": "2",
+            "description": "\u6570\u7ec4\u7ef4\u5ea6\u6570\u91cf"
+        },
+        "NAXIS1": {
+            "value": "2472",
+            "description": "\u6570\u636e\u8f74\u957f\u5ea6 1"
+        },
+        "NAXIS2": {
+            "value": "2064",
+            "description": "\u6570\u636e\u8f74\u957f\u5ea6 2"
+        },
+        "EXTEND": {
+            "value": "",
+            "description": "\u53ef\u80fd\u5b58\u5728\u6269\u5c55"
+        },
+        "BZERO": {
+            "value": "",
+            "description": "\u7f29\u653e\u96f6\u70b9"
+        },
+        "BSCALE": {
+            "value": "",
+            "description": "\u7f29\u653e\u56e0\u5b50"
+        },
+        "DATE-OBS": {
+            "value": "2024-10-09_10-57-32",
+            "description": "\u89c2\u6d4b\u65e5\u671f"
+        },
+        "EXPTIME": {
+            "value": "20.000 ms",
+            "description": "\u66dd\u5149\u65f6\u95f4"
+        },
+        "TELESCOP": {
+            "value": "QHY5III568C-5a14ed5417d3246bd",
+            "description": "\u671b\u8fdc\u955c\u540d\u79f0"
+        },
+        "INSTRUME": {
+            "value": "",
+            "description": "\u4eea\u5668\u4f7f\u7528"
+        },
+        "OBSERVER": {
+            "value": "LQ",
+            "description": "\u89c2\u6d4b\u8005\u540d\u79f0"
+        },
+        "OBJECT": {
+            "value": "Home",
+            "description": "\u89c2\u6d4b\u5bf9\u8c61"
+        },
+        "RA": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u5bf9\u8c61\u7684\u5929\u6587\u5750\u6807"
+        },
+        "DEC": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u5bf9\u8c61\u7684\u5929\u6587\u5750\u6807"
+        },
+        "EQUINOX": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u5bf9\u8c61\u7684\u5929\u6587\u5750\u6807\u7cfb\u7edf"
+        },
+        "FILTER": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u65f6\u4f7f\u7528\u7684\u6ee4\u955c"
+        },
+        "AIRMASS": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u65f6\u7684\u6c14\u56e2"
+        },
+        "LST": {
+            "value": "",
+            "description": "\u89c2\u6d4b\u5f00\u59cb\u65f6\u7684\u672c\u5730\u6052\u661f\u65f6"
+        },
+        "GAIN": {
+            "value": "",
+            "description": "\u63a2\u6d4b\u5668\u589e\u76ca"
+        },
+        "READNOIS": {
+            "value": "",
+            "description": "\u63a2\u6d4b\u5668\u8bfb\u566a\u58f0"
+        },
+        "CD1_1": {
+            "value": "",
+            "description": "\u53d8\u6362\u77e9\u9635\u5143\u7d20"
+        },
+        "CD1_2": {
+            "value": "",
+            "description": "\u53d8\u6362\u77e9\u9635\u5143\u7d20"
+        },
+        "CD2_1": {
+            "value": "",
+            "description": "\u53d8\u6362\u77e9\u9635\u5143\u7d20"
+        },
+        "CD2_2": {
+            "value": "",
+            "description": "\u53d8\u6362\u77e9\u9635\u5143\u7d20"
+        },
+        "CTYPE1": {
+            "value": "",
+            "description": "\u5750\u6807\u7c7b\u578b in axis 1"
+        },
+        "CTYPE2": {
+            "value": "",
+            "description": "\u5750\u6807\u7c7b\u578b in axis 2"
+        },
+        "CRPIX1": {
+            "value": "",
+            "description": "\u53c2\u8003\u50cf\u7d20 in axis 1"
+        },
+        "CRPIX2": {
+            "value": "",
+            "description": "\u53c2\u8003\u50cf\u7d20 in axis 2"
+        },
+        "CRVAL1": {
+            "value": "",
+            "description": "\u53c2\u8003\u50cf\u7d20\u7684\u5750\u6807\u503c in axis 1"
+        },
+        "CRVAL2": {
+            "value": "",
+            "description": "\u53c2\u8003\u50cf\u7d20\u7684\u5750\u6807\u503c in axis 2"
+        },
+        "CUNIT1": {
+            "value": "",
+            "description": "\u5750\u6807\u5355\u4f4d in axis 1"
+        },
+        "CUNIT2": {
+            "value": "",
+            "description": "\u5750\u6807\u5355\u4f4d in axis 2"
+        },
+        "COMMENT": {
+            "value": "",
+            "description": "\u901a\u7528\u6ce8\u91ca"
+        },
+        "HISTORY": {
+            "value": "",
+            "description": "\u5904\u7406\u5386\u53f2"
+        }
+    }
+}

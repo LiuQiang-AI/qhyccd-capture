@@ -6,15 +6,19 @@ from datetime import datetime
 from astropy.io import fits
 import numpy as np
 from .language import translations
+
 class SaveThread(QThread):
     finished = pyqtSignal()  # 定义一个信号
 
-    def __init__(self, buffer_queue, file_path, file_name, file_format, save_mode, fps,language, num_threads=4):
+    def __init__(self, buffer_queue, file_path, file_name, file_format, save_mode, fps,language,jpeg_quality = 100,tiff_compression = 0,fits_header = None,num_threads=4):
         super().__init__()
         self.language = language
+        self.jpeg_quality = jpeg_quality
+        self.tiff_compression = tiff_compression
         self.buffer_queue = buffer_queue
         self.file_path = file_path
         self.file_format = file_format
+        self.fits_header = fits_header
         if 'now-time' in file_name:
             current_time = datetime.now().strftime('%Y%m%d_%H%M%S')  # 获取当前时间字符串
             file_name = file_name.replace('now-time', current_time)  # 替换 'now-time' 为当前时间
@@ -41,7 +45,7 @@ class SaveThread(QThread):
                         break
                     
                     # 提交保存任务到线程池，传递当前帧计数
-                    full_path = os.path.join(folder_path, f"{self.frame_count}.{self.file_format}")  # 生成文件名
+                    full_path = f"{folder_path}/{self.frame_count}.{self.file_format}"  # 生成文件名
                     executor.submit(self.save_image, imgdata_np, full_path,self.file_format)
                     self.frame_count += 1
                     self.buffer_queue.task_done()
@@ -106,25 +110,46 @@ class SaveThread(QThread):
             if imgdata_np.ndim == 3:  # 检查是否为三通道彩色图像
                 imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_RGB2BGR)  # 将RGB转换为BGR
             if file_format.lower() == 'fits':
-                # 确保数据类型为浮点型或整数型
-                if imgdata_np.dtype not in [np.float32, np.float64, np.uint8, np.int16]:
-                    imgdata_np = imgdata_np.astype(np.float32)  # 转换为浮点型
-                
-                # 保存为 FITS 格式
+                # 创建FITS HDU对象
                 hdu = fits.PrimaryHDU(imgdata_np)
-                hdu.writeto(file_path, overwrite=True)
-                # print(f"图像已保存为 FITS 格式: {file_path}")
+                # 假设 self.fits_header 是一个字典，包含要添加到FITS头的键值对
+                if self.fits_header is not None:
+                    for key, header_item in self.fits_header.items():
+                        if key == 'SIMPLE':
+                            continue
+                        # 尝试将值转换为数字，如果是数字的话
+                        value = self.convert_to_number(header_item['value'])
+                        hdu.header[key] = value
+                        if 'description' in header_item and self.language == "en":
+                            hdu.header.comments[key] = header_item['description']
+                # 写入文件
+                try:
+                    hdu.writeto(file_path, overwrite=True)
+                except Exception as e:
+                    print(f"{translations[self.language]['qhyccd_capture']['debug']['save_image_failed']}: {e}")
             else:
                 # 保存为常见格式（PNG, JPEG, TIFF）
                 if file_format.lower() == 'png':
                     cv2.imwrite(file_path, imgdata_np)
                 elif file_format.lower() == 'jpeg' or file_format.lower() == 'jpg':
-                    cv2.imwrite(file_path, imgdata_np, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                    cv2.imwrite(file_path, imgdata_np, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
                 elif file_format.lower() == 'tiff':
-                    cv2.imwrite(file_path, imgdata_np, [int(cv2.IMWRITE_TIFF_COMPRESSION), 1])
+
+                    cv2.imwrite(file_path, imgdata_np, [int(cv2.IMWRITE_TIFF_COMPRESSION), self.tiff_compression])
                 else:
-                    # print("不支持的图像格式")
                     return
-                # print(f"图像已保存为 {file_format.upper()} 格式: {file_path}")
         except Exception as e:
             print(f"{translations[self.language]['qhyccd_capture']['debug']['save_image_failed']}: {e}")
+
+    def convert_to_number(self, value):
+        """尝试将字符串转换为整数或浮点数"""
+        try:
+            # 尝试转换为整数
+            return int(value)
+        except ValueError:
+            # 如果不是整数，尝试转换为浮点数
+            try:
+                return float(value)
+            except ValueError:
+                # 如果也不是浮点数，返回原字符串
+                return value

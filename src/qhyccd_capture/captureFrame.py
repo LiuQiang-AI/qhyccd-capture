@@ -23,7 +23,7 @@ class CaptureThread(QThread):
         ret = self.qhyccddll.ExpQHYCCDSingleFrame(self.camhandle)
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['exp_qhyccd_single_frame_failed']}: {ret}")
-        # print("ExpQHYCCDSingleFrame() ret =", ret)
+            return  # 如果启动失败，直接返回避免进一步阻塞
 
         # 获取单帧图像数据
         w = ctypes.c_uint32()
@@ -42,7 +42,8 @@ class CaptureThread(QThread):
         ret = self.qhyccddll.GetQHYCCDSingleFrame(self.camhandle, byref(w), byref(h), byref(b), byref(c), imgdata)
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_single_frame_failed']}: {ret}")
-            return
+            return  # 如果获取失败，直接返回避免进一步阻塞
+
         # print("GetQHYCCDSingleFrame() ret =", ret, "w =", w.value, "h =", h.value, "b =", b.value, "c =", c.value,
         #     "data size =", int(w.value * h.value * b.value * c.value / 8))
         # print("data =", imgdata)

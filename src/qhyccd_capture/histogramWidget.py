@@ -79,15 +79,12 @@ class HistogramWidget(QWidget):  # 保持类名不变
                         self.histogram.remove()
             self.ax.legend().remove()  # 移除现有的图例
 
-            max_value = imgdata_np.max()
-            if max_value == 0:
-                # 如果最大值为0，说明图像全为零，可以跳过更新或设置默认范围
-                return  # 或者 bins_range = (0, 1) 等其他逻辑处理
+            max_value = 0
 
             # 使用NumPy的向量化操作计算直方图
             mask = imgdata_np > 0
             if imgdata_np.dtype == np.uint16:
-                bins_range = (1, max_value)
+                bins_range = (1, 65535)
                 bins_number = 65535
             else:
                 bins_range = (1, 255)
@@ -98,8 +95,9 @@ class HistogramWidget(QWidget):  # 保持类名不变
                 smoothed_histogram = gaussian_filter(histogram, sigma=2)  # 使用高斯滤波平滑数据
                 valid_indices = smoothed_histogram > 0  # 获取非零值的索引
                 self.histogram, = self.ax.plot(bins[:-1][valid_indices], smoothed_histogram[valid_indices], color='black', label="Gray Level Distribution")
-                if smoothed_histogram.max() > max_value:
-                    max_value = smoothed_histogram.max()
+                smoothed_histogram_max = smoothed_histogram[int(len(smoothed_histogram)*0.05):int(len(smoothed_histogram)*0.95)].max()
+                if smoothed_histogram_max > max_value:
+                    max_value = smoothed_histogram_max
                 # print(f"histogram: {histogram}")
             else:  # 彩色图像
                 colors = ('r', 'g', 'b')
@@ -110,7 +108,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
                     valid_indices = smoothed_histogram > 0  # 获取非零值的索引
                     line, = self.ax.plot(bins[:-1][valid_indices], smoothed_histogram[valid_indices], color=color, label=f'{color.upper()} Channel')
                     self.histogram.append(line)
-                    smoothed_histogram_max = smoothed_histogram[:50000].max()
+                    smoothed_histogram_max = smoothed_histogram[int(len(smoothed_histogram)*0.05):int(len(smoothed_histogram)*0.95)].max()
                     if smoothed_histogram_max > max_value:
                         max_value = smoothed_histogram_max
             self.ax.set_xlim(bins_range)
@@ -120,7 +118,6 @@ class HistogramWidget(QWidget):  # 保持类名不变
             if not self.ax.get_legend():
                 self.ax.legend()
 
-            # Ensure GUI updates are done in the main thread
             self.canvas.draw_idle()
 
     def update_min_max_lines(self, min_value, max_value):
@@ -135,6 +132,9 @@ class HistogramWidget(QWidget):  # 保持类名不变
         self.min_line = plt.axvline(x=min_value, color='red', linestyle='--', label='Min Value')  # Min line
         self.max_line = plt.axvline(x=max_value, color='green', linestyle='--', label='Max Value')  # Max line
 
+        # 添加图例，仅当不存在时
+        if not self.ax.get_legend():
+            self.ax.legend()
+            
         # 更新画布
-        plt.legend()
-        self.canvas.draw_idle()  # Update drawing
+        self.canvas.draw_idle()  

@@ -8,7 +8,7 @@ class CameraConnectionThread(QThread):
     update_status_signal = pyqtSignal(str)
     handle_signal = pyqtSignal(str)  # 定义一个新的信号用于发送句柄
     get_read_mode_signal = pyqtSignal(dict)  # 定义一个新的信号用于发送读取模式的字典
-    already_connected_signal = pyqtSignal(bool)  # 定义一个新的信号用于发送相机是否已经连接
+    already_connected_signal = pyqtSignal(bool,int)  # 定义一个新的信号用于发送相机是否已经连接
     already_disconnected_signal = pyqtSignal(bool)  # 定义一个新的信号用于发送相机是否已经断开
 
     def __init__(self, qhyccddll,camera_id, read_mode, stream_mode, language, parent=None):
@@ -84,7 +84,7 @@ class CameraConnectionThread(QThread):
             return
         else:
             self.update_status_signal.emit(translations[self.language]['camera_thread']['init_camera_success'])
-        self.already_connected_signal.emit(True)  # 发送相机已经连接的信号
+        self.already_connected_signal.emit(True,self.read_mode)  # 发送相机已经连接的信号
         
     def disconnect(self):
         # 断开相机的逻辑

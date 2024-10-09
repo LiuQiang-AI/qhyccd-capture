@@ -3,10 +3,13 @@ MANIFEST.in
 README.md
 pyproject.toml
 src/qhyccd_capture/__init__.py
+src/qhyccd_capture/auto_exposure.py
 src/qhyccd_capture/camera_thread.py
 src/qhyccd_capture/captureFrame.py
 src/qhyccd_capture/captureStatus.py
 src/qhyccd_capture/control_id.py
+src/qhyccd_capture/fits_header.py
+src/qhyccd_capture/fits_header_defaults.py
 src/qhyccd_capture/histogramWidget.py
 src/qhyccd_capture/language.py
 src/qhyccd_capture/memory_updated.py
