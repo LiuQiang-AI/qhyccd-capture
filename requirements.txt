@@ -6,3 +6,5 @@ astropy
 psutil
 napari
 qtrangeslider
+photutils
+pybind11

@@ -83,9 +83,7 @@ Requires-Dist: pyqt5; extra == "testing"
 - **直方图和白平衡**：提供直方图均衡化和白平衡调整功能。
 - **ROI（感兴趣区域）**：支持创建和应用 ROI，以便对特定区域进行操作。
 
-## 安装
-
-你可以通过 [pip] 安装 `qhyccd-capture`：
+## 安装qhyccd-capture：
 
     conda create -n qhyccd-capture python=3.10
     conda activate qhyccd-capture
@@ -97,6 +95,15 @@ Requires-Dist: pyqt5; extra == "testing"
 ## 使用
 
     napari  
+
+## 依赖安装
+#### Astrometry.net
+
+    sudo apt-get install astrometry.net
+    sudo apt-get install astrometry-data-tycho2
+    sudo vim ~/.bashrc
+    # 添加以下内容
+    export PATH=$PATH:/usr/local/astrometry/bin
 
 ## Contributing
 

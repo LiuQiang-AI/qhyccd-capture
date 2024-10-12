@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt,pyqtSlot, QTimer
-from PyQt5.QtGui import QIcon,QTextCursor
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+from PyQt5.QtGui import QIcon, QTextCursor
 from napari_plugin_engine import napari_hook_implementation
 import numpy as np
 import ctypes
@@ -8,9 +8,20 @@ from ctypes import *
 import os
 import warnings
 from datetime import datetime
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
 import cv2
 import time
+import queue
+import json
+import pickle
+import csv
+from multiprocessing import Array
+from threading import Lock
+from astropy.stats import sigma_clipped_stats
+from astropy.io import fits
+
+
+# Import custom modules
 from .control_id import CONTROL_ID
 from .previewThread import PreviewThread
 from .captureStatus import CaptureStatusThread
@@ -23,15 +34,9 @@ from .language import translations
 from .camera_thread import CameraConnectionThread
 from .fits_header import FitsHeaderEditor
 from .auto_exposure import AutoExposureDialog
-import queue
-import json
-import pickle
-from multiprocessing import Array
-from threading import Lock
-from astropy.stats import sigma_clipped_stats
-from photutils import DAOStarFinder
-from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
-import csv
+from .stellarSolver import StellarSolver
+from .astrometry import AstrometrySolver, AstrometryDialog
+
 
 class CameraControlWidget(QWidget):
     def __init__(self, napari_viewer):
@@ -137,6 +142,23 @@ class CameraControlWidget(QWidget):
         self.roi_created = False
         self.viewer.mouse_drag_callbacks.append(self.on_mouse_click)
         self.viewer.mouse_double_click_callbacks.append(self.on_mouse_double_click)
+        
+        # 星点解析库
+        self.astrometrySolver = None
+        try:
+            self.astrometrySolver = AstrometrySolver(language=self.language)
+            self.astrometrySolver.finished.connect(self.on_astrometry_finished)
+            self.astrometrySolver.error.connect(self.on_astrometry_error)
+            self.astrometrySolver.star_info.connect(self.on_astrometry_star_info)
+        except Exception as e:
+            print(f"Failed to initialize AstrometrySolver: {str(e)}")
+        
+        
+        self.stellarSolver = None
+        try:
+            self.stellarSolver = StellarSolver()
+        except Exception as e:
+            print(f"Failed to initialize StellarSolver: {str(e)}")
 
     def initialize_ui(self):
          # 创建一个滚动区域
@@ -649,15 +671,35 @@ class CameraControlWidget(QWidget):
         self.star_fwhm.setToolTip(translations[self.language]['qhyccd_capture']['star_fwhm_tooltip'])
         star_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['star_fwhm']), self.star_fwhm)
         
-        # 星点解析
+        
+        # 星点解析方法选择
+        self.star_analysis_method_selector = QComboBox()
+        self.star_analysis_method_selector.addItems([
+            'photutils',
+            'Astrometry',
+        ])
+        star_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['star_analysis_method']), self.star_analysis_method_selector)
+        
+        # 星点解析和保存表格按钮的水平布局
+        star_button_layout = QHBoxLayout()
+        
+        # 星点解析按钮
         self.star_analysis_button = QPushButton(translations[self.language]['qhyccd_capture']['star_analysis'])
         self.star_analysis_button.clicked.connect(self.star_analysis)
-        star_layout.addRow(self.star_analysis_button)
+        star_button_layout.addWidget(self.star_analysis_button)
         
-        # 保存表格
+        # 保存表格按钮
         self.save_star_table_button = QPushButton(translations[self.language]['qhyccd_capture']['save_star_table'])
         self.save_star_table_button.clicked.connect(self.save_star_table)
-        star_layout.addRow(self.save_star_table_button)
+        star_button_layout.addWidget(self.save_star_table_button)
+        
+        # 将按钮布局添加到星点解析布局中
+        star_layout.addRow(star_button_layout)
+        
+        # 添加循环进度条
+        self.star_progress_bar = QProgressBar()
+        self.star_progress_bar.setRange(0, 100)  # 设置为循环模式
+        star_layout.addRow(self.star_progress_bar)
         
         self.star_group.setLayout(star_layout)
         image_control_layout.addWidget(self.star_group)
@@ -2645,11 +2687,6 @@ class CameraControlWidget(QWidget):
             ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value, 1.0)
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_auto_white_balance_failed']}: {ret}")
-                # 创建一个足够大的缓冲区来接收数据
-                debug_info_buffer = create_string_buffer(1024)
-                # 传递指针的指针
-                ret = self.qhyccddll.OutputQHYCCDDebug(debug_info_buffer)
-                print(f"debug_info: {debug_info_buffer.value.decode('utf-8')}:{ret}")
                 return
             self.append_text(f"{translations[self.language]['qhyccd_capture']['set_qhyccd_auto_white_balance_success']}: {ret}")
             
@@ -2667,59 +2704,152 @@ class CameraControlWidget(QWidget):
             image = self.viewer.layers[-1].data
         else:
             return
-
+        self.append_text(translations[self.language]['qhyccd_capture']['prepare_to_star_analysis'])
         # 如果图像是彩色的，转换为灰度图
         if image.ndim == 3 and image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # 计算背景统计数据
-        mean, median, std = sigma_clipped_stats(image, sigma=3.0)
+        if self.star_analysis_method_selector.currentText() == 'photutils':
+            self.star_progress_bar.setRange(0, 0)
+            from photutils import DAOStarFinder
+            # 计算背景统计数据
+            mean, median, std = sigma_clipped_stats(image, sigma=3.0)
 
+            fwhm = self.star_fwhm.value()
+            # 使用 DAOStarFinder 进行星点检测
+            daofinder = DAOStarFinder(fwhm=fwhm, threshold=5.*std)
+            sources = daofinder(image - median)
+            if sources is None or len(sources) == 0:
+                self.append_text(translations[self.language]['qhyccd_capture']['no_detected_stars'])
+                self.star_progress_bar.setRange(0, 100)
+                return
 
-        fwhm = self.star_fwhm.value()
-        # 使用 DAOStarFinder 进行星点检测
-        daofinder = DAOStarFinder(fwhm=fwhm, threshold=5.*std)
-        sources = daofinder(image - median)
-        if sources is None or len(sources) == 0:
-            print("未检测到星点")
-            return
+            # 创建新的星点信息表格
+            self.star_table = QTableWidget()
+            self.star_table.setWindowTitle("Detected Stars")
+            self.star_table.setColumnCount(len(sources.colnames))  # 设置列数为 sources 表的列数
+            self.star_table.setHorizontalHeaderLabels(sources.colnames)  # 设置表头为 sources 表的列名
+            self.star_table.setRowCount(len(sources))  # 设置行数为检测到的星点数
 
-        # 创建新的星点信息表格
+            # 创建点的列表
+            points = []
+
+            # 填充表格并添加点
+            for i, star in enumerate(sources):
+                for j, col_name in enumerate(sources.colnames):
+                    value = star[col_name]
+                    if isinstance(value, float):
+                        value = f"{value:.2f}"  # 格式化浮点数
+                    self.star_table.setItem(i, j, QTableWidgetItem(str(value)))
+
+                # 添加点到列表
+                point = [star['ycentroid'], star['xcentroid']]
+                points.append(point)
+
+            # 显示表格
+            self.star_table.show()
+
+            # 在 napari 查看器中添加点图层
+            if 'Star Points' in self.viewer.layers:
+                self.viewer.layers['Star Points'].data = points
+                layer_index = self.viewer.layers.index('Star Points')
+                self.viewer.layers.move(layer_index, -1)
+            else:
+                self.viewer.add_points(points, size=fwhm, face_color='red', edge_color='white', name='Star Points')
+            self.star_progress_bar.setRange(0, 100)
+            self.append_text(translations[self.language]['qhyccd_capture']['star_analysis_completed'])
+        elif self.star_analysis_method_selector.currentText() == 'Astrometry' and self.astrometrySolver is not None:
+            dialog = AstrometryDialog(self, self.astrometrySolver,self.language)
+            if dialog.exec_() == QDialog.Accepted:  # 检查对话框是否被接受
+                self.star_progress_bar.setRange(0, 0)
+                params = dialog.get_parameters()
+                # print(f"params: {params}")  # 打印或使用参数
+                with fits.open("/home/q/work/qhyccd-capture/data/2.fits") as file:
+                    self.astrometrySolver.start_solving(image_input=file[0].data, params=params)
+                self.star_analysis_button.setEnabled(False)
+            else:
+                self.append_text(translations[self.language]['qhyccd_capture']['cancel_solving'])  # 可以根据需要处理用户取消的情况
+            
+    def parse_star_data(self,data):
+        # 分割数据为行
+        lines = data.strip().split('\n')
+        title_line = lines[0].split()
+        title_line.insert(0, "ID")
+        star_dict = {}
+        for i,title in enumerate(title_line):
+            star_dict[title] = []
+        for line in lines[1:]:
+            parts = line.split()
+            for i,title in enumerate(title_line):
+                star_dict[title].append(float(parts[i]))
+        return star_dict    
+            
+    def on_astrometry_finished(self, result):
+        print(f"Astrometry result: {result}")
+        self.append_text(f"Astrometry result: {result}")
+        self.star_analysis_button.setEnabled(True)
+        self.star_progress_bar.setRange(0, 100)
+        self.append_text(translations[self.language]['qhyccd_capture']['star_analysis_completed'])
+             
+    def on_astrometry_error(self, error):
+        warnings.warn(f"Astrometry error: {error}")
+        self.append_text(f"Astrometry error: {error}")
+        self.star_analysis_button.setEnabled(True)
+        self.star_progress_bar.setRange(0, 100)
+        
+    def on_astrometry_star_info(self, data, wcs):
+        self.star_dict = self.parse_star_data(data)
         self.star_table = QTableWidget()
         self.star_table.setWindowTitle("Detected Stars")
-        self.star_table.setColumnCount(len(sources.colnames))  # 设置列数为 sources 表的列数
-        self.star_table.setHorizontalHeaderLabels(sources.colnames)  # 设置表头为 sources 表的列名
-        self.star_table.setRowCount(len(sources))  # 设置行数为检测到的星点数
+        self.star_table.setColumnCount(len(self.star_dict) + 2)  # 只增加两列用于显示赤经和赤纬
+        headers = list(self.star_dict.keys()) + ['RA', 'Dec']
+        self.star_table.setHorizontalHeaderLabels(headers)
+        self.star_table.setRowCount(len(self.star_dict[list(self.star_dict.keys())[0]]))
 
-        # 创建点的列表
         points = []
+        properties = {'info': []}  # 创建一个字典来存储每个点的信息
 
-        # 填充表格并添加点
-        for i, star in enumerate(sources):
-            for j, col_name in enumerate(sources.colnames):
-                value = star[col_name]
+        for i in range(len(self.star_dict[list(self.star_dict.keys())[0]])):
+            x = self.star_dict['X'][i]
+            y = self.star_dict['Y'][i]
+            ra, dec = wcs.all_pix2world(x, y, 0)
+            info = f"RA: {ra:.6f}, Dec: {dec:.6f}"
+            properties['info'].append(info)  # 将信息添加到 properties 字典中
+
+            for j, key in enumerate(self.star_dict.keys()):
+                value = self.star_dict[key][i]
                 if isinstance(value, float):
-                    value = f"{value:.2f}"  # 格式化浮点数
+                    value = f"{value:.2f}"
                 self.star_table.setItem(i, j, QTableWidgetItem(str(value)))
 
-            # 添加点到列表
-            point = [star['ycentroid'], star['xcentroid']]
+            self.star_table.setItem(i, len(self.star_dict), QTableWidgetItem(f"{ra:.6f}"))
+            self.star_table.setItem(i, len(self.star_dict) + 1, QTableWidgetItem(f"{dec:.6f}"))
+
+            point = [y, x]  # 注意 napari 使用 (y, x) 格式
             points.append(point)
 
-        # 显示表格
         self.star_table.show()
 
-        # 在 napari 查看器中添加点图层
+        # 在 napari 查看器中添加点图层并绑定鼠标悬停事件
         if 'Star Points' in self.viewer.layers:
-            self.viewer.layers['Star Points'].data = points
-            layer_index = self.viewer.layers.index('Star Points')
-            self.viewer.layers.move(layer_index, -1)
-        else:
-            self.viewer.add_points(points, size=fwhm, face_color='red', edge_color='white', name='Star Points')
+            self.viewer.layers.remove('Star Points')
+        points_layer = self.viewer.add_points(points, size=self.star_fwhm.value(), face_color='red', border_color='white', name='Star Points', properties=properties)
+        points_layer.mouse_move_callbacks.append(self.display_point_info)
 
+        self.star_progress_bar.setRange(0, 100)
+
+    def display_point_info(self, layer, event):
+        """显示鼠标悬停点的信息"""
+        hovered_point_index = layer.get_value(event.position, world=True)
+        if hovered_point_index is None:
+            self.viewer.status = ""
+            return
+        info = layer.properties['info'][hovered_point_index]
+        self.viewer.status = info  # 将信息显示在 napari 
+        
     def save_star_table(self):
         if self.star_table is None:
-            print("未检测到星点")
+            self.append_text(translations[self.language]['qhyccd_capture']['no_detected_stars'])
             return
         file_path, _ = QFileDialog.getSaveFileName(self, translations[self.language]['qhyccd_capture']['save_star_table'], "", "CSV Files (*.csv)")
         if file_path:
@@ -2729,7 +2859,7 @@ class CameraControlWidget(QWidget):
                 for row in range(self.star_table.rowCount()):
                     row_data = [self.star_table.item(row, col).text() for col in range(self.star_table.columnCount())]
                     writer.writerow(row_data)
-            print(f"星点表格已保存到 {file_path}")
+            self.append_text(f"{translations[self.language]['qhyccd_capture']['star_table_saved']}: {file_path}")
         
 @napari_hook_implementation
 def napari_experimental_provide_dock_widget():

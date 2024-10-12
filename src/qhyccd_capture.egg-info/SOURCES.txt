@@ -3,6 +3,7 @@ MANIFEST.in
 README.md
 pyproject.toml
 src/qhyccd_capture/__init__.py
+src/qhyccd_capture/astrometry.py
 src/qhyccd_capture/auto_exposure.py
 src/qhyccd_capture/camera_thread.py
 src/qhyccd_capture/captureFrame.py
@@ -18,6 +19,7 @@ src/qhyccd_capture/previewThread.py
 src/qhyccd_capture/qhyccd_capture.py
 src/qhyccd_capture/save_video.py
 src/qhyccd_capture/setting.py
+src/qhyccd_capture/stellarSolver.py
 src/qhyccd_capture.egg-info/PKG-INFO
 src/qhyccd_capture.egg-info/SOURCES.txt
 src/qhyccd_capture.egg-info/dependency_links.txt

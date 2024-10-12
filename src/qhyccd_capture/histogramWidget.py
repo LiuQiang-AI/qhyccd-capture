@@ -77,7 +77,8 @@ class HistogramWidget(QWidget):  # 保持类名不变
                 else:
                     if self.histogram.figure is not None:  # 检查线条是否仍在图中
                         self.histogram.remove()
-            self.ax.legend().remove()  # 移除现有的图例
+            if self.ax.get_legend():
+                self.ax.legend().remove()  # 移除现有的图例
 
             max_value = 0
 

@@ -210,17 +210,17 @@ class AutoExposureDialog(QDialog):
     def auto_exposure_mode_changed(self):
         mode = self.exposure_mode_combo.currentIndex()
         if mode == 0:
-            self.exposure_time.setVisible(False)
-            self.gain_Max.setVisible(False)
+            self.exposure_time.setEnabled(False)
+            self.gain_Max.setEnabled(False)
         elif mode == 1:
-            self.exposure_time.setVisible(False)
-            self.gain_Max.setVisible(True)
+            self.exposure_time.setEnabled(False)
+            self.gain_Max.setEnabled(True)
         elif mode == 2:
-            self.exposure_time.setVisible(True)
-            self.gain_Max.setVisible(False)
+            self.exposure_time.setEnabled(True)
+            self.gain_Max.setEnabled(False)
         elif mode == 3:
-            self.exposure_time.setVisible(True)
-            self.gain_Max.setVisible(True)
+            self.exposure_time.setEnabled(True)
+            self.gain_Max.setEnabled(True)
 
     def send_exposure_value(self):
         # 获取当前曝光值
