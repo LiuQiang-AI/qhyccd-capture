@@ -34,6 +34,7 @@ from .language import translations
 from .camera_thread import CameraConnectionThread
 from .fits_header import FitsHeaderEditor
 from .auto_exposure import AutoExposureDialog
+from .auto_white_balance import AutoWhiteBalanceDialog
 from .stellarSolver import StellarSolver
 from .astrometry import AstrometrySolver, AstrometryDialog
 
@@ -1447,6 +1448,7 @@ class CameraControlWidget(QWidget):
                 # print(f"Debayer模式{mode}设置失败!")
                 warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
                 self.append_text(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+    
     def update_resolution(self,x,y,w,h):
         # print(f"update_resolution: ({x},{y}) --> ({x+w},{y+h})")
         # 设置分辨率
@@ -1592,6 +1594,9 @@ class CameraControlWidget(QWidget):
     def update_auto_white_balance(self):
         if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0:
             self.auto_white_balance_button.setVisible(True)
+            self.auto_white_balance_dialog = AutoWhiteBalanceDialog(self.qhyccddll,self.camera,self.language,self)
+            self.auto_white_balance_dialog.balance_complete_signal.connect(self.on_auto_white_balance_complete)
+            self.auto_white_balance_dialog.values_signal.connect(self.on_auto_white_balance_values_changed)
         else:
             self.auto_white_balance_button.setVisible(False)
         
@@ -2723,14 +2728,12 @@ class CameraControlWidget(QWidget):
         self.auto_exposure_dialog.exec_()
 
     def toggle_auto_white_balance(self):
-        if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0:
-            print(f"camhandle:{self.camhandle},CONTROL_AUTOWHITEBALANCE:{CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value},{self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value)}")
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value, 1.0)
-            if ret != 0:
-                warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_auto_white_balance_failed']}: {ret}")
-                self.append_text(f"{translations[self.language]['debug']['set_qhyccd_auto_white_balance_failed']}: {ret}")
-                return
-            self.append_text(f"{translations[self.language]['qhyccd_capture']['set_qhyccd_auto_white_balance_success']}: {ret}")
+        if self.auto_white_balance_button.text() == translations[self.language]['qhyccd_capture']['auto_white_balance_stop']:
+            self.auto_white_balance_dialog.stop()
+            self.auto_white_balance_button.setText(translations[self.language]['qhyccd_capture']['auto_white_balance'])
+        else:
+            self.auto_white_balance_dialog.start()
+            self.auto_white_balance_button.setText(translations[self.language]['qhyccd_capture']['auto_white_balance_stop'])
             
     def on_auto_exposure_changed(self, mode):
         if mode == 0:
@@ -2741,6 +2744,15 @@ class CameraControlWidget(QWidget):
     def on_auto_exposure_value_changed(self, exposure_time):
         self.exposure_time.setValue(exposure_time)
         
+    def on_auto_white_balance_complete(self, wb_red, wb_green, wb_blue):
+        self.auto_white_balance_button.setEnabled(True)
+        self.wb_red.setValue(wb_red)
+        self.wb_green.setValue(wb_green)
+        self.wb_blue.setValue(wb_blue)
+        
+    def on_auto_white_balance_values_changed(self, wb_red, wb_green, wb_blue):
+        self.append_text(f"wb_red: {wb_red}, wb_green: {wb_green}, wb_blue: {wb_blue}")
+           
     def star_analysis(self):
         if len(self.viewer.layers) > 0:
             image = self.viewer.layers[-1].data

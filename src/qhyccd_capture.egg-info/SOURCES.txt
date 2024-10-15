@@ -5,6 +5,7 @@ pyproject.toml
 src/qhyccd_capture/__init__.py
 src/qhyccd_capture/astrometry.py
 src/qhyccd_capture/auto_exposure.py
+src/qhyccd_capture/auto_white_balance.py
 src/qhyccd_capture/camera_thread.py
 src/qhyccd_capture/captureFrame.py
 src/qhyccd_capture/captureStatus.py
