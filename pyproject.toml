@@ -44,7 +44,8 @@ testing = [
 [project.entry-points."napari.manifest"]
 qhyccd-capture = "qhyccd_capture:napari.yaml"
 
-
+[project.entry-points."napari.plugin"]
+napari-fits = "fits_reader.load_fits_data:napari_get_reader"
 
 [build-system]
 requires = ["setuptools>=42.0.0", "wheel"]
@@ -58,7 +59,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml"]
-
 
 [tool.setuptools.dynamic]
 version = {attr = "qhyccd_capture.__init__.__version__"}

@@ -29,7 +29,7 @@ class CaptureStatusThread(QThread):
                 if elapsed_time == -1:
                     elapsed_time = 0
                 # 发送状态文本和耗时
-                self.update_status.emit(f"{status_texts[index]} {translations[self.language]['captureStatus']['exposure']}: {elapsed_time}")
+                self.update_status.emit(f"{status_texts[index]} {translations[self.language]['captureStatus']['exposure']}{elapsed_time}")
                 index = (index + 1) % len(status_texts)
             else:
                 if not paused_signal_sent:  # 仅在第一次暂停时发送信号

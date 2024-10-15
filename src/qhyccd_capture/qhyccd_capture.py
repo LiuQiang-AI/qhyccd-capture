@@ -1007,6 +1007,7 @@ class CameraControlWidget(QWidget):
             ret = self.qhyccddll.GetQHYCCDId(index, id_buffer)
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_id_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['get_qhyccd_id_failed']}: {ret}")
             result_id = id_buffer.value.decode("utf-8")
             self.camera_ids[result_id] = id_buffer
         self.camera_selector.clear()
@@ -1042,6 +1043,7 @@ class CameraControlWidget(QWidget):
         if not connected:
             # self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
             warnings.warn(f"{translations[self.language]['debug']['camera_connected_failed']}")
+            self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
             return
         # 更新参数
         self.update_camera_color()
@@ -1094,6 +1096,7 @@ class CameraControlWidget(QWidget):
                     slider.valueChanged.disconnect()  # 断开之前的连接
         except Exception as e:
             warnings.warn(f"{translations[self.language]['debug']['disconnect_white_balance_failed']}: {e}")
+            self.append_text(f"{translations[self.language]['debug']['disconnect_white_balance_failed']}: {e}")
         self.init_state = False
         # 初始化所有区域为隐藏状态
         self.settings_box.setVisible(False)
@@ -1151,14 +1154,14 @@ class CameraControlWidget(QWidget):
         if self.capture_status_label.text().startswith(translations[self.language]["qhyccd_capture"]["capturing"]):
             self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_complete"])
                
-    def update_camera_color(self):
+    def update_camera_color(self):   
         # 判断相机是否是彩色相机
         try:
             if not self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value):
                 is_color_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value)
                 if is_color_value == 4294967295.0:
                     warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_is_color_camera_failed']}")
-                    # print("返回值表示错误或无效，使用相机名字进行判断")
+                    self.append_text(f"{translations[self.language]['debug']['get_qhyccd_is_color_camera_failed']}")
                     self.is_color_camera = self.is_color_camera_by_name(self.camera_name)
                 else:
                     self.is_color_camera = not bool(is_color_value)
@@ -1249,6 +1252,7 @@ class CameraControlWidget(QWidget):
             self.wb_red.setEnabled(True)
             wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBR.value)
+            self.append_text(f"wb_red:{wb_red},min_data:{min_data},max_data:{max_data},step:{step}")
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value, (max_data-min_data)//2)
                 self.wb_red.setRange(int(-100), int(100))
@@ -1269,7 +1273,7 @@ class CameraControlWidget(QWidget):
             self.wb_green.setEnabled(True)
             wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBG.value)
-            # print(f"wb_green:{wb_green},min_data:{min_data},max_data:{max_data},step:{step}")
+            self.append_text(f"wb_green:{wb_green},min_data:{min_data},max_data:{max_data},step:{step}")
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value, (max_data-min_data)//2)
                 self.wb_green.setRange(int(-100), int(100))
@@ -1290,7 +1294,7 @@ class CameraControlWidget(QWidget):
             self.wb_blue.setEnabled(True)
             wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value)
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBB.value)
-            # print(f"wb_blue:{wb_blue},min_data:{min_data},max_data:{max_data},step:{step}")
+            self.append_text(f"wb_blue:{wb_blue},min_data:{min_data},max_data:{max_data},step:{step}")
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
                 self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value, (max_data-min_data)//2)
                 self.wb_blue.setRange(int(-100), int(100))
@@ -1309,6 +1313,7 @@ class CameraControlWidget(QWidget):
         ret = self.qhyccddll.GetQHYCCDEffectiveArea(self.camhandle, byref(startX), byref(startY), byref(sizeX), byref(sizeY))
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_effective_area_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['get_qhyccd_effective_area_failed']}: {ret}")
         self.camera_H = sizeY.value
         self.camera_W = sizeX.value
         self.image_x = startX.value
@@ -1336,6 +1341,7 @@ class CameraControlWidget(QWidget):
                                         byref(pixelH), byref(imageB))
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_chip_info_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['get_qhyccd_chip_info_failed']}: {ret}")
         self.camera_bit = imageB.value
         self.camera_depth_options = self.swap_elements(self.camera_depth_options, f"{imageB.value}bit")
 
@@ -1389,15 +1395,7 @@ class CameraControlWidget(QWidget):
         ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin[updated_items[0]][0], self.camera_pixel_bin[updated_items[0]][1])
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
-        
-        # startX = ctypes.c_uint32()
-        # startY = ctypes.c_uint32()
-        # sizeX = ctypes.c_uint32()
-        # sizeY = ctypes.c_uint32()
-        
-        # ret = self.qhyccddll.GetQHYCCDEffectiveArea(self.camhandle, byref(startX), byref(startY), byref(sizeX), byref(sizeY))
-        # if ret != 0:
-        #     warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_effective_area_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
         
         self.image_w = int(self.camera_W/self.camera_pixel_bin[updated_items[0]][0])
         self.image_h = int(self.camera_H/self.camera_pixel_bin[updated_items[0]][1])
@@ -1420,6 +1418,7 @@ class CameraControlWidget(QWidget):
         ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, self.camera_depth_options[updated_items[0]])
         if ret == -1:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
             return -1
         self.camera_bit = self.camera_depth_options[updated_items[0]]
         self.depth_selector.addItems(updated_items)  # 添加新的选项
@@ -1436,6 +1435,7 @@ class CameraControlWidget(QWidget):
             if ret == -1:
                 # print(f"Debayer模式{mode}设置失败!")
                 warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
         elif self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.is_color_camera:
             self.Debayer_mode_selector.setEnabled(True)
             self.Debayer_mode_selector.setVisible(True)
@@ -1446,13 +1446,14 @@ class CameraControlWidget(QWidget):
             if ret == -1:
                 # print(f"Debayer模式{mode}设置失败!")
                 warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
-
+                self.append_text(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
     def update_resolution(self,x,y,w,h):
         # print(f"update_resolution: ({x},{y}) --> ({x+w},{y+h})")
         # 设置分辨率
         ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, x, y, w, h)
         if ret == -1:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
         self.x.setRange(0,w-1)
         self.x.setValue(x)
@@ -1623,6 +1624,7 @@ class CameraControlWidget(QWidget):
         if ret == -1:
             # print(f"分辨率设置失败!")
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
         # print("SetQHYCCDResolution() ret =", ret)
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_thread is None:
@@ -1643,6 +1645,7 @@ class CameraControlWidget(QWidget):
         if ret == -1:
             # print(f"分辨率设置失败!")
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_resolution_failed']}: {ret}")
             return -1
         # print(f"还原分辨率设置为: ({0},{0}) --> ({self.camera_W},{self.camera_H})")
         self.x.setValue(0)
@@ -1755,6 +1758,7 @@ class CameraControlWidget(QWidget):
         ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin[bin_size][0], self.camera_pixel_bin[bin_size][1])
         if ret == -1:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_bin_mode_failed']}: {ret}")
             return -1
         self.bin = self.camera_pixel_bin[bin_size]
         self.image_x = 0
@@ -1782,6 +1786,7 @@ class CameraControlWidget(QWidget):
                 if ret == -1:
                     # print(f"Debayer模式设置失败!")
                     warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
+                    self.append_text(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
                 self.Debayer_mode_selector.setEnabled(False)
                 self.Debayer_mode_selector.setCurrentText(translations[self.language]["qhyccd_capture"]["debayer_mode_false"])
                 self.Debayer_mode = False
@@ -1794,6 +1799,7 @@ class CameraControlWidget(QWidget):
         if ret == -1:
             # print(f"位深{depth}设置失败!")
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_transferbit_failed']}: {ret}")
             return -1
         self.camera_bit = self.camera_depth_options[depth]
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
@@ -1823,7 +1829,7 @@ class CameraControlWidget(QWidget):
         if ret == -1:
             # print(f"Debayer模式{mode}设置失败!")
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
-        
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_debayer_mode_failed']}: {ret}")
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.start_preview()
         self.append_text(f"{translations[self.language]['qhyccd_capture']['update_debayer_mode']}{mode}")
@@ -1906,12 +1912,7 @@ class CameraControlWidget(QWidget):
                 if self.current_image_name in self.viewer.layers:
                     self.viewer.layers.pop(self.current_image_name)
                 self.viewer.add_image(self.current_image, name=self.current_image_name)
-                # if self.camera_bit == 16:
-                #     self.viewer.layers[self.current_image_name].contrast_limits = (0, 65535)
-                # else:
-                #     self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
-            # 确保图像在最上层
-            self.viewer.layers.selection.active = self.viewer.layers[self.current_image_name]
+            
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
  
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
@@ -1923,11 +1924,12 @@ class CameraControlWidget(QWidget):
             if imgdata_np.ndim == 2:
                 imgdata_np_3c = np.stack([imgdata_np] * 3, axis=-1)
                 imgdata_np_3c = imgdata_np_3c[np.newaxis, ...]
+                sequential_display_ndim = 2
             if imgdata_np.ndim == 3:
-                # imgdata_np = imgdata_np.transpose(2,0,1)
                 imgdata_np_3c = imgdata_np[np.newaxis, ...]
+                sequential_display_ndim = 3
             # print(f"imgdata_np.ndim: {imgdata_np.ndim}")
-            if self.current_image is None or (imgdata_np_3c.ndim != self.current_image.ndim and imgdata_np_3c.shape[1:] != self.current_image.shape[1:] and imgdata_np_3c.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
+            if self.current_image is None or (imgdata_np_3c.ndim != self.current_image.ndim or imgdata_np_3c.shape[1:] != self.current_image.shape[1:] or imgdata_np_3c.dtype != self.current_image.dtype) or self.current_image.ndim != 4:
                 self.current_image = imgdata_np_3c
                 self.current_image_name = f'{camera_name}-sequence'
             else:
@@ -1948,12 +1950,39 @@ class CameraControlWidget(QWidget):
                 # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
+            else:
+                sequential_display_ndim = 1
             # 定位显示拍摄的最后一张图片
             self.viewer.layers[self.current_image_name].refresh()
             self.viewer.dims.set_point(0, self.current_image.shape[0] - 1)
-        # 确保图像在最上层
-        if self.viewer.layers:
-            self.viewer.layers.selection.active = self.viewer.layers[-1]
+            
+        # 检查图层是否存在于图层列表中
+        if self.current_image_name in self.viewer.layers:
+            # 获取当前图层
+            layer = self.viewer.layers[self.current_image_name]
+            # 获取当前图层的索引
+            current_index = self.viewer.layers.index(layer)
+            # 计算最上层的索引（即图层列表的长度减一）
+            top_index = len(self.viewer.layers) - 1
+            # 如果图层不在最上层，则移动到最上层
+            if current_index != top_index and display_mode == translations[self.language]["qhyccd_capture"]["sequential_display"]:
+                # 获取当前图层
+                layer = self.viewer.layers[self.current_image_name]
+                # 移除当前图层
+                self.viewer.layers.remove(layer)
+                # 重新添加图层到列表末尾，使其显示在最上层
+                self.viewer.layers.append(layer)
+                # 设置为当前活跃的图层
+                self.viewer.layers.selection.active = layer
+                            # 定位显示拍摄的最后一张图片
+                self.viewer.layers[self.current_image_name].refresh()
+                self.viewer.dims.set_point(0, self.current_image.shape[0] - 1)
+            else:
+                # 移动图层到最上层
+                self.viewer.layers.move(current_index, top_index)
+            # 设置为当前活跃的图层
+            self.viewer.layers.selection.active = layer
+            
         self.contrast_limits_name = self.current_image_name
         
         self.bind_contrast_limits_event()
@@ -1963,7 +1992,15 @@ class CameraControlWidget(QWidget):
         self.capture_in_progress = False
         self.start_button.setText(translations[self.language]["qhyccd_capture"]["start_capture"])
         self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_finished"])
-        self.img_buffer.put(imgdata_np)
+        if display_mode == translations[self.language]["qhyccd_capture"]["sequential_display"]:
+            if sequential_display_ndim == 2:
+                self.img_buffer.put(imgdata_np[-1,:,:,-1])
+            elif sequential_display_ndim == 3:
+                self.img_buffer.put(imgdata_np[-1])
+            else:
+                self.img_buffer.put(imgdata_np)
+        else:
+            self.img_buffer.put(imgdata_np)
         self.histogram_widget.update_histogram()
         # self.capture_status_thread.pause_capture()
 
@@ -2003,6 +2040,7 @@ class CameraControlWidget(QWidget):
         if ret == -1:
             # print(f"参数范围获取失败！")
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_param_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['get_qhyccd_param_failed']}: {ret}")
         return minValue.value,maxValue.value,step.value
     
     def update_exposure_time(self):
@@ -2015,6 +2053,7 @@ class CameraControlWidget(QWidget):
             self.append_text(f"{translations[self.language]['qhyccd_capture']['set_exposure_time_success']}: {exposure_time} us")
         else:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_exposure_time_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['set_qhyccd_exposure_time_failed']}: {ret}")
         return ret
     
     def update_gain(self, value):
@@ -2129,6 +2168,7 @@ class CameraControlWidget(QWidget):
                 self.viewer.layers.remove(self.roi_layer)
         except Exception as e:
             warnings.warn(f"{translations[self.language]['debug']['clear_roi_failed']}: {e}")
+            self.append_text(f"{translations[self.language]['debug']['clear_roi_failed']}: {e}")
         self.roi_layer = None
         self.roi_points = []
 
@@ -2462,7 +2502,7 @@ class CameraControlWidget(QWidget):
             ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle)
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
-                
+                self.append_text(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
             # 根据位深和颜色模式确定数据类型和大小
             dtype_code = 'H' if self.camera_bit == 16 else 'B'  # 'H' 对应 ctypes.c_uint16，'B' 对应 ctypes.c_ubyte
             
@@ -2487,6 +2527,7 @@ class CameraControlWidget(QWidget):
             ret = self.qhyccddll.StopQHYCCDLive(self.camhandle)
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
             self.preview_thread.stop()
             self.preview_checkbox.setChecked(False)
             self.preview_thread = None
@@ -2687,6 +2728,7 @@ class CameraControlWidget(QWidget):
             ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value, 1.0)
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_auto_white_balance_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['set_qhyccd_auto_white_balance_failed']}: {ret}")
                 return
             self.append_text(f"{translations[self.language]['qhyccd_capture']['set_qhyccd_auto_white_balance_success']}: {ret}")
             

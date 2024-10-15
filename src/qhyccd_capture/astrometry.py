@@ -167,7 +167,9 @@ class AstrometryDialog(QDialog):
             self.reject()  # 关闭对话框，不执行操作
 
     def on_save_image_state_changed(self, state):
+        self.save_image_path_label.setVisible(state==Qt.Checked)
         self.save_image_path_input.setVisible(state==Qt.Checked)
+        self.save_image_name_label.setVisible(state==Qt.Checked)
         self.save_image_name_input.setVisible(state==Qt.Checked)
 
     def get_parameters(self):

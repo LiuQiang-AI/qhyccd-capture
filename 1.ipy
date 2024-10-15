@@ -1,7 +1,0 @@
-from astropy.io import fits
-with fits.open('tmpal4j9kvg.axy') as hdul:
-    header = hdul[0].header
-    print(header)
-    data = hdul[0].data
-    print(data)
-

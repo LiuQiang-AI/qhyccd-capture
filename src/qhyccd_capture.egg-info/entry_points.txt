@@ -1,2 +1,5 @@
 [napari.manifest]
 qhyccd-capture = qhyccd_capture:napari.yaml
+
+[napari.plugin]
+napari-fits = fits_reader.load_fits_data:napari_get_reader
