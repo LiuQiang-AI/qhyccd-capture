@@ -2762,6 +2762,9 @@ class CameraControlWidget(QWidget):
         # 如果图像是彩色的，转换为灰度图
         if image.ndim == 3 and image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        elif image.ndim == 4 and image.shape[-1] == 3:
+            image = image[0]
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         if self.star_analysis_method_selector.currentText() == 'photutils':
             self.star_progress_bar.setRange(0, 0)
@@ -2818,8 +2821,7 @@ class CameraControlWidget(QWidget):
                 self.star_progress_bar.setRange(0, 0)
                 params = dialog.get_parameters()
                 # print(f"params: {params}")  # 打印或使用参数
-                with fits.open("/home/q/work/qhyccd-capture/data/2.fits") as file:
-                    self.astrometrySolver.start_solving(image_input=file[0].data, params=params)
+                self.astrometrySolver.start_solving(image_input=image, params=params)
                 self.star_analysis_button.setEnabled(False)
             else:
                 self.append_text(translations[self.language]['qhyccd_capture']['cancel_solving'])  # 可以根据需要处理用户取消的情况
@@ -2855,30 +2857,34 @@ class CameraControlWidget(QWidget):
         self.star_dict = self.parse_star_data(data)
         self.star_table = QTableWidget()
         self.star_table.setWindowTitle("Detected Stars")
-        self.star_table.setColumnCount(len(self.star_dict) + 2)  # 只增加两列用于显示赤经和赤纬
-        headers = list(self.star_dict.keys()) + ['RA', 'Dec']
+        if wcs is not None:
+            self.star_table.setColumnCount(len(self.star_dict) + 2)  
+            headers = list(self.star_dict.keys()) + ['RA', 'Dec']
+        else:
+            self.star_table.setColumnCount(len(self.star_dict))
+            headers = list(self.star_dict.keys())
         self.star_table.setHorizontalHeaderLabels(headers)
         self.star_table.setRowCount(len(self.star_dict[list(self.star_dict.keys())[0]]))
 
         points = []
         properties = {'info': []}  # 创建一个字典来存储每个点的信息
-
+        
         for i in range(len(self.star_dict[list(self.star_dict.keys())[0]])):
             x = self.star_dict['X'][i]
             y = self.star_dict['Y'][i]
-            ra, dec = wcs.all_pix2world(x, y, 0)
-            info = f"RA: {ra:.6f}, Dec: {dec:.6f}"
-            properties['info'].append(info)  # 将信息添加到 properties 字典中
+            if wcs is not None:
+                ra, dec = wcs.all_pix2world(x, y, 0)
+                info = f"RA: {ra:.6f}, Dec: {dec:.6f}"
+                properties['info'].append(info)  # 将信息添加到 properties 字典中
 
             for j, key in enumerate(self.star_dict.keys()):
                 value = self.star_dict[key][i]
                 if isinstance(value, float):
                     value = f"{value:.2f}"
                 self.star_table.setItem(i, j, QTableWidgetItem(str(value)))
-
-            self.star_table.setItem(i, len(self.star_dict), QTableWidgetItem(f"{ra:.6f}"))
-            self.star_table.setItem(i, len(self.star_dict) + 1, QTableWidgetItem(f"{dec:.6f}"))
-
+            if wcs is not None:
+                self.star_table.setItem(i, len(self.star_dict), QTableWidgetItem(f"{ra:.6f}"))
+                self.star_table.setItem(i, len(self.star_dict) + 1, QTableWidgetItem(f"{dec:.6f}"))
             point = [y, x]  # 注意 napari 使用 (y, x) 格式
             points.append(point)
 

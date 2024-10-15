@@ -267,6 +267,7 @@ class AstrometrySolver(QThread):
                 with fits.open(self.temp_file[:-5]+".wcs") as file:
                     wcs = WCS(file[0].header)
             except Exception as e:
+                wcs = None
                 self.error.emit(f"{translations[self.language]['astrometry']['failed_to_calculate_wcs']}: {str(e)}")
                 
             # Clean up the temporary file
@@ -290,17 +291,17 @@ class AstrometrySolver(QThread):
                 except Exception as e:
                     self.error.emit(f"{translations[self.language]['astrometry']['failed_to_save_image']}: {str(e)}")
             
-            # try:
-            #     # Remove all related temporary files
-            #     base_file = self.temp_file.rsplit('.', 1)[0]
-            #     for ext in ['fits', 'axy', 'corr', 'match', 'rdls', 'solved', 'wcs']:
-            #         file_to_remove = f"{base_file}.{ext}"
-            #         if os.path.exists(file_to_remove):
-            #             os.remove(file_to_remove)
-            #     file_to_remove = f"{base_file}-indx.xyls"
-            #     if os.path.exists(file_to_remove):
-            #         os.remove(file_to_remove)
-            # except Exception as e:
-            #     self.error.emit(f"{translations[self.language]['astrometry']['failed_to_remove_temporary_files']}: {str(e)}")
+            try:
+                # Remove all related temporary files
+                base_file = self.temp_file.rsplit('.', 1)[0]
+                for ext in ['fits', 'axy', 'corr', 'match', 'rdls', 'solved', 'wcs']:
+                    file_to_remove = f"{base_file}.{ext}"
+                    if os.path.exists(file_to_remove):
+                        os.remove(file_to_remove)
+                file_to_remove = f"{base_file}-indx.xyls"
+                if os.path.exists(file_to_remove):
+                    os.remove(file_to_remove)
+            except Exception as e:
+                self.error.emit(f"{translations[self.language]['astrometry']['failed_to_remove_temporary_files']}: {str(e)}")
 
 
