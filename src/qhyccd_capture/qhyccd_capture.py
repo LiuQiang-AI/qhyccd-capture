@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QIcon, QTextCursor
 from napari_plugin_engine import napari_hook_implementation
+import napari
 import numpy as np
 import ctypes
 from ctypes import *
@@ -829,20 +830,19 @@ class CameraControlWidget(QWidget):
                 if os.path.exists(lib_path):
                     self.qhyccddll = cdll.LoadLibrary(lib_path)
                 else:
-                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} 不存在")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} ")
             else:
                 # 其他操作系统（不推荐使用）
                 lib_path = '/usr/local/lib/libqhyccd.so'
                 if os.path.exists(lib_path):
                     self.qhyccddll = cdll.LoadLibrary(lib_path)
                 else:
-                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} 不存在")
+                    raise FileNotFoundError(f"{translations[self.language]['debug']['not_found_sdk']}: {lib_path} ")
             # 设置函数的参数和返回值类型
             self.settings_dialog.qhyccd_path_label.setText(lib_path)
         else:
             self.qhyccddll = cdll.LoadLibrary(file_path)
 
-        
 
         # 获取机 ID
         self.qhyccddll.GetQHYCCDId.argtypes = [ctypes.c_uint32, ctypes.c_char_p]
@@ -2753,10 +2753,18 @@ class CameraControlWidget(QWidget):
     def on_auto_white_balance_values_changed(self, wb_red, wb_green, wb_blue):
         self.append_text(f"wb_red: {wb_red}, wb_green: {wb_green}, wb_blue: {wb_blue}")
            
+    def get_image_layer(self):
+        # 从最后一个图层开始向前检查，找到第一个图像图层
+        for layer in reversed(self.viewer.layers):
+            if isinstance(layer, napari.layers.Image):
+                return layer.data
+        # 如果没有找到图像图层，返回None
+        return None
+           
     def star_analysis(self):
-        if len(self.viewer.layers) > 0:
-            image = self.viewer.layers[-1].data
-        else:
+        image = self.get_image_layer()
+        if image is None:
+            self.append_text(translations[self.language]['qhyccd_capture']['no_image_layer'])
             return
         self.append_text(translations[self.language]['qhyccd_capture']['prepare_to_star_analysis'])
         # 如果图像是彩色的，转换为灰度图
@@ -2911,11 +2919,15 @@ class CameraControlWidget(QWidget):
         if self.star_table is None:
             self.append_text(translations[self.language]['qhyccd_capture']['no_detected_stars'])
             return
+
         file_path, _ = QFileDialog.getSaveFileName(self, translations[self.language]['qhyccd_capture']['save_star_table'], "", "CSV Files (*.csv)")
         if file_path:
             with open(file_path, 'w', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(self.star_table.horizontalHeader().labels())
+                # 获取所有列的标题
+                headers = [self.star_table.horizontalHeaderItem(i).text() for i in range(self.star_table.columnCount())]
+                writer.writerow(headers)
+                # 写入每一行的数据
                 for row in range(self.star_table.rowCount()):
                     row_data = [self.star_table.item(row, col).text() for col in range(self.star_table.columnCount())]
                     writer.writerow(row_data)

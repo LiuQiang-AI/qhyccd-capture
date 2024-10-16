@@ -147,6 +147,7 @@ translations = {
             'auto_white_balance_stop': 'Stop Auto White Balance',
             # 'set_qhyccd_auto_white_balance_success': 'Set QHYCCD Auto White Balance Success',
             'star_analysis_method': 'Star Analysis Method',
+            'no_image_layer': 'No Image Layer',
             'prepare_to_star_analysis': 'Prepare to Star Analysis...',
             'star_analysis_completed': 'Star Analysis Completed!',
             'no_detected_stars': 'No Detected Stars',
@@ -509,6 +510,7 @@ translations = {
             'no_detected_stars': '未检测到星点',
             'cancel_solving': '取消解析。',
             'star_table_saved': '星点表格已保存到',
+            'no_image_layer': '没有图像图层',
         },       
         'setting': {
             'settings': '设置',

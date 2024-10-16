@@ -78,7 +78,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
                     if self.histogram.figure is not None:  # 检查线条是否仍在图中
                         self.histogram.remove()
             if self.ax.get_legend():
-                self.ax.legend().remove()  # 移除现有的图例
+                self.ax.get_legend().remove()  # 移除现有的图例
 
             max_value = 0
 
@@ -99,7 +99,7 @@ class HistogramWidget(QWidget):  # 保持类名不变
                 smoothed_histogram_max = smoothed_histogram[int(len(smoothed_histogram)*0.05):int(len(smoothed_histogram)*0.95)].max()
                 if smoothed_histogram_max > max_value:
                     max_value = smoothed_histogram_max
-                # print(f"histogram: {histogram}")
+
             else:  # 彩色图像
                 colors = ('r', 'g', 'b')
                 self.histogram = []

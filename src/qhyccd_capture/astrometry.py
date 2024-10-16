@@ -136,6 +136,7 @@ class AstrometryDialog(QDialog):
         self.layout.addRow(translations[self.language]['astrometry']['save_image_label'], self.save_image_checkbox)  # 使用 addRow 添加控件
         
         self.save_image_path_label = QLabel(translations[self.language]['astrometry']['save_image_path_label'])
+        self.save_image_path_label.setVisible(False)
         self.save_image_path_input = QLineEdit()
         self.save_image_path_input.setText(os.getcwd())
         self.save_image_path_input.setToolTip(translations[self.language]['astrometry']['save_image_path_tooltip'])
@@ -143,6 +144,7 @@ class AstrometryDialog(QDialog):
         self.layout.addRow(self.save_image_path_label, self.save_image_path_input)  # 使用 addRow 添加控件
         
         self.save_image_name_label = QLabel(translations[self.language]['astrometry']['save_image_name_label'])
+        self.save_image_name_label.setVisible(False)
         self.save_image_name_input = QLineEdit()
         self.save_image_name_input.setText("astrometry.fits")
         self.save_image_name_input.setToolTip(translations[self.language]['astrometry']['save_image_name_tooltip'])
@@ -192,7 +194,7 @@ class AstrometryDialog(QDialog):
             'timestamp': '--timestamp' if self.timestamp_label.isChecked() else '',
             'no_remove_lines': '--no-remove-lines' if self.no_remove_lines_checkbox.isChecked() else '',
             'uniformize': ['--uniformize', self.uniformize_input.value()] ,
-            'save_image': ['--save-image', self.save_image_path_input.text(), self.save_image_name_input.text()] if self.save_image_checkbox.isChecked() else '',
+            'save_image': [self.save_image_path_input.text(), self.save_image_name_input.text()] if self.save_image_checkbox.isChecked() else '',
         }
 
 
@@ -218,6 +220,8 @@ class AstrometrySolver(QThread):
             self.save_image = True
             self.save_image_path = value[0]
             self.save_image_name = value[1]
+            print(f"save_image_path: {self.save_image_path}")
+            print(f"save_image_name: {self.save_image_name}")
             return
         if not hasattr(self, 'params'):
             self.params = {}
@@ -284,9 +288,9 @@ class AstrometrySolver(QThread):
             if self.save_image:
                 try:
                     # 保存图像
-                    if self.save_image_name[-4:]!='.fits':
+                    if self.save_image_name[-5:]!='.fits':
                         self.save_image_name += '.fits'
-                    save_image_cmd = ['mv',"-p",self.temp_file, os.path.join(self.save_image_path, self.save_image_name)]
+                    save_image_cmd = ['mv',self.temp_file[:-5]+".new", os.path.join(self.save_image_path, self.save_image_name)]
                     subprocess.run(save_image_cmd, check=True, text=True, capture_output=True)
                 except Exception as e:
                     self.error.emit(f"{translations[self.language]['astrometry']['failed_to_save_image']}: {str(e)}")
