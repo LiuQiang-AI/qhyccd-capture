@@ -7,6 +7,7 @@ import tempfile
 import os
 from PyQt5.QtWidgets import QDialog, QSpinBox, QDoubleSpinBox, QCheckBox, QLabel, QPushButton, QFormLayout, QComboBox, QHBoxLayout, QLineEdit,QMessageBox
 from PyQt5.QtCore import Qt
+
 from .language import translations
 
 class AstrometryDialog(QDialog):
@@ -200,7 +201,7 @@ class AstrometryDialog(QDialog):
 
 class AstrometrySolver(QThread):
     finished = pyqtSignal(str)
-    star_info = pyqtSignal(str,WCS)
+    star_info = pyqtSignal(str,WCS,bool)
     error = pyqtSignal(str)
 
     def __init__(self, language='en'):
@@ -270,8 +271,10 @@ class AstrometrySolver(QThread):
             try:    
                 with fits.open(self.temp_file[:-5]+".wcs") as file:
                     wcs = WCS(file[0].header)
+                wcs_tip = True
             except Exception as e:
-                wcs = None
+                wcs = WCS()
+                wcs_tip = False
                 self.error.emit(f"{translations[self.language]['astrometry']['failed_to_calculate_wcs']}: {str(e)}")
                 
             # Clean up the temporary file
@@ -281,7 +284,7 @@ class AstrometrySolver(QThread):
                 tablist_cmd = ['tablist', axy_file]
                 try:
                     result = subprocess.run(tablist_cmd, check=True, text=True, capture_output=True)
-                    self.star_info.emit(result.stdout,wcs)
+                    self.star_info.emit(result.stdout,wcs,wcs_tip)
                 except subprocess.CalledProcessError as e:
                     self.error.emit(f"{translations[self.language]['astrometry']['tablist_command_failed']}: {e.stderr}")
             

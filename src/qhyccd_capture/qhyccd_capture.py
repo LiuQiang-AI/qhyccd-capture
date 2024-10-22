@@ -49,7 +49,7 @@ class CameraControlWidget(QWidget):
         self.initialize_state()
         self.initialize_ui()
         self.append_text(translations[self.language]['qhyccd_capture']['init_complete'])
-        
+
         '''初始化相机资源'''
         try:
             if self.settings_dialog.qhyccd_path_label.text() is None or self.settings_dialog.qhyccd_path_label.text() == "" or self.settings_dialog.qhyccd_path_label.text() == " ":
@@ -1079,6 +1079,10 @@ class CameraControlWidget(QWidget):
         self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["connected"]}')
         self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
         self.connect_button.setEnabled(True)
+        
+        # 初始禁用自动白平衡和自动曝光按钮
+        self.auto_white_balance_button.setVisible(False)
+        self.auto_exposure_button.setVisible(False)
     
     def already_disconnected_signal(self,disconnected):
         if not disconnected:
@@ -2861,11 +2865,11 @@ class CameraControlWidget(QWidget):
         self.star_analysis_button.setEnabled(True)
         self.star_progress_bar.setRange(0, 100)
         
-    def on_astrometry_star_info(self, data, wcs):
+    def on_astrometry_star_info(self, data, wcs,wcs_tip):
         self.star_dict = self.parse_star_data(data)
         self.star_table = QTableWidget()
         self.star_table.setWindowTitle("Detected Stars")
-        if wcs is not None:
+        if wcs_tip:
             self.star_table.setColumnCount(len(self.star_dict) + 2)  
             headers = list(self.star_dict.keys()) + ['RA', 'Dec']
         else:
@@ -2880,7 +2884,7 @@ class CameraControlWidget(QWidget):
         for i in range(len(self.star_dict[list(self.star_dict.keys())[0]])):
             x = self.star_dict['X'][i]
             y = self.star_dict['Y'][i]
-            if wcs is not None:
+            if wcs_tip:
                 ra, dec = wcs.all_pix2world(x, y, 0)
                 info = f"RA: {ra:.6f}, Dec: {dec:.6f}"
                 properties['info'].append(info)  # 将信息添加到 properties 字典中
@@ -2890,7 +2894,7 @@ class CameraControlWidget(QWidget):
                 if isinstance(value, float):
                     value = f"{value:.2f}"
                 self.star_table.setItem(i, j, QTableWidgetItem(str(value)))
-            if wcs is not None:
+            if wcs_tip:
                 self.star_table.setItem(i, len(self.star_dict), QTableWidgetItem(f"{ra:.6f}"))
                 self.star_table.setItem(i, len(self.star_dict) + 1, QTableWidgetItem(f"{dec:.6f}"))
             point = [y, x]  # 注意 napari 使用 (y, x) 格式
@@ -2901,9 +2905,12 @@ class CameraControlWidget(QWidget):
         # 在 napari 查看器中添加点图层并绑定鼠标悬停事件
         if 'Star Points' in self.viewer.layers:
             self.viewer.layers.remove('Star Points')
-        points_layer = self.viewer.add_points(points, size=self.star_fwhm.value(), face_color='red', border_color='white', name='Star Points', properties=properties)
-        points_layer.mouse_move_callbacks.append(self.display_point_info)
-
+        if wcs_tip:
+            points_layer = self.viewer.add_points(points, size=self.star_fwhm.value(), face_color='red', border_color='white', name='Star Points', properties=properties)
+            points_layer.mouse_move_callbacks.append(self.display_point_info)
+        else:
+            points_layer = self.viewer.add_points(points, size=self.star_fwhm.value(), face_color='red', border_color='white', name='Star Points')
+    
         self.star_progress_bar.setRange(0, 100)
 
     def display_point_info(self, layer, event):
