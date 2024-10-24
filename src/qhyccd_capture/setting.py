@@ -85,10 +85,10 @@ class SettingsDialog(QDialog):
             with open(self.settings_file, 'r') as f:
                 settings = json.load(f)
                 self.qhyccd_path = settings.get("qhyccd_path", "")
-                self.language = settings.get("language", "zh")
+                self.language = settings.get("language", "en")
         else:
             self.qhyccd_path = ""
-            self.language = "zh"  # 默认语言
+            self.language = "en"  # 默认语言
 
     def save_settings(self):
         current_language = self.language_combo.currentText()
