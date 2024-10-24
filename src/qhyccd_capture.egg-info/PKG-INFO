@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: qhyccd-capture
-Version: 0.0.3.2
+Version: 0.0.3.3
 Summary: The basic operations for QHYCCD series cameras
 Author: QHYCCD
 Author-email: lq@qhyccd.com
@@ -87,7 +87,7 @@ Requires-Dist: napari; extra == "testing"
 - **CFW Control**: Supports CFW control and displays CFW status.
 - **Star Point Resolution**: Supports star point resolution and displays the results.
 
-![alt text](src/qhyccd_capture/images/image.png)
+![qhyccd-capture 插件界面显示](https://raw.githubusercontent.com/LiuQiang-AI/qhyccd-capture/main/src/qhyccd_capture/images/image.png)
 
 ## Installation
 You can install via pip:

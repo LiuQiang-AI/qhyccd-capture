@@ -39,3 +39,4 @@ src/qhyccd_capture/icon/instagram_icon.png
 src/qhyccd_capture/icon/thermometer_icon.png
 src/qhyccd_capture/icon/toggle_right_icon.png
 src/qhyccd_capture/icon/video_icon.png
+src/qhyccd_capture/images/image.png
