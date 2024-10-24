@@ -8,8 +8,6 @@ pyproject.toml
 requirements.txt
 settings.json
 tox.ini
-dist/qhyccd_capture-0.0.3-py3-none-any.whl
-dist/qhyccd_capture-0.0.3.tar.gz
 src/qhyccd_capture/__init__.py
 src/qhyccd_capture/astrometry.py
 src/qhyccd_capture/auto_exposure.py
