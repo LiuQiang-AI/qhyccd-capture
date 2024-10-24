@@ -33,7 +33,7 @@ class PreviewThread(QThread):
                 if len(self.frame_times) > 300:
                     self.frame_times.pop(0)
                 if len(self.frame_times) > 1:
-                    fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0])
+                    fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0]+0.0001)
                 else:
                     fps = 0.0
                 self.frame_captured.emit(fps)

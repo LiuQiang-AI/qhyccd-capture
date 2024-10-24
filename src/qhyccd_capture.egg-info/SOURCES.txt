@@ -1,7 +1,14 @@
 LICENSE
 MANIFEST.in
 README.md
+headers.json
+luts.pkl
 pyproject.toml
+requirements.txt
+settings.json
+tox.ini
+data/1.png
+data/2.png
 src/qhyccd_capture/__init__.py
 src/qhyccd_capture/astrometry.py
 src/qhyccd_capture/auto_exposure.py
@@ -27,3 +34,9 @@ src/qhyccd_capture.egg-info/dependency_links.txt
 src/qhyccd_capture.egg-info/entry_points.txt
 src/qhyccd_capture.egg-info/requires.txt
 src/qhyccd_capture.egg-info/top_level.txt
+src/qhyccd_capture/icon/camera_icon.png
+src/qhyccd_capture/icon/film_icon.png
+src/qhyccd_capture/icon/instagram_icon.png
+src/qhyccd_capture/icon/thermometer_icon.png
+src/qhyccd_capture/icon/toggle_right_icon.png
+src/qhyccd_capture/icon/video_icon.png

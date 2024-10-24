@@ -1,9 +1,9 @@
 Metadata-Version: 2.1
 Name: qhyccd-capture
-Version: 0.0.1
+Version: 0.0.2
 Summary: The basic operations for QHYCCD series cameras
-Author: LQ
-Author-email: 1263291772@qq.com
+Author: QHYCCD
+Author-email: lq@qhyccd.com
 License: 
         Copyright (c) 2024, 
         All rights reserved.
@@ -53,6 +53,14 @@ Requires-Dist: numpy
 Requires-Dist: magicgui
 Requires-Dist: qtpy
 Requires-Dist: scikit-image
+Requires-Dist: opencv-python
+Requires-Dist: PyQt5
+Requires-Dist: matplotlib
+Requires-Dist: astropy
+Requires-Dist: psutil
+Requires-Dist: qtrangeslider
+Requires-Dist: photutils
+Requires-Dist: pybind11
 Provides-Extra: testing
 Requires-Dist: tox; extra == "testing"
 Requires-Dist: pytest; extra == "testing"
@@ -62,13 +70,6 @@ Requires-Dist: napari; extra == "testing"
 Requires-Dist: pyqt5; extra == "testing"
 
 # qhyccd-capture
-
-[![License BSD-3](https://img.shields.io/pypi/l/qhyccd-sdk.svg?color=green)](https://github.com//qhyccd-sdk/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/qhyccd-sdk.svg?color=green)](https://pypi.org/project/qhyccd-sdk)
-[![Python Version](https://img.shields.io/pypi/pyversions/qhyccd-sdk.svg?color=green)](https://python.org)
-[![tests](https://github.com//qhyccd-sdk/workflows/tests/badge.svg)](https://github.com//qhyccd-sdk/actions)
-[![codecov](https://codecov.io/gh//qhyccd-sdk/branch/main/graph/badge.svg)](https://codecov.io/gh//qhyccd-sdk)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/qhyccd-sdk)](https://napari-hub.org/plugins/qhyccd-sdk)
 
 ## 项目简介
 
@@ -105,6 +106,10 @@ Requires-Dist: pyqt5; extra == "testing"
     # 添加以下内容
     export PATH=$PATH:/usr/local/astrometry/bin
 
+# 版本变化
+
+- 2024-10-23 版本 0.0.1 初始版本 实现了QHYCCD相机的基本操作
+
 ## Contributing
 
 Contributions are very welcome. Tests can be run with [tox], please ensure
@@ -115,22 +120,3 @@ the coverage at least stays the same before you submit a pull request.
 Distributed under the terms of the [BSD-3] license,
 "qhyccd-sdk" is free and open source software
 
-## Issues
-
-If you encounter any problems, please [file an issue] along with a detailed description.
-
-[napari]: https://github.com/napari/napari
-[copier]: https://copier.readthedocs.io/en/stable/
-[@napari]: https://github.com/napari
-[MIT]: http://opensource.org/licenses/MIT
-[BSD-3]: http://opensource.org/licenses/BSD-3-Clause
-[GNU GPL v3.0]: http://www.gnu.org/licenses/gpl-3.0.txt
-[GNU LGPL v3.0]: http://www.gnu.org/licenses/lgpl-3.0.txt
-[Apache Software License 2.0]: http://www.apache.org/licenses/LICENSE-2.0
-[Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
-[napari-plugin-template]: https://github.com/napari/napari-plugin-template
-
-[napari]: https://github.com/napari/napari
-[tox]: https://tox.readthedocs.io/en/latest/
-[pip]: https://pypi.org/project/pip/
-[PyPI]: https://pypi.org/

@@ -5,8 +5,8 @@ description = "The basic operations for QHYCCD series cameras"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-  {name = "LQ"},
-  {email = "1263291772@qq.com"},
+  {name = "QHYCCD"},
+  {email = "lq@qhyccd.com"},
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -29,6 +29,14 @@ dependencies = [
     "magicgui",
     "qtpy",
     "scikit-image",
+    "opencv-python",
+    "PyQt5",
+    "matplotlib",
+    "astropy",
+    "psutil",
+    "qtrangeslider",
+    "photutils",
+    "pybind11",
 ]
 
 [project.optional-dependencies]
@@ -38,14 +46,13 @@ testing = [
     "pytest-cov",  # https://pytest-cov.readthedocs.io/en/latest/
     "pytest-qt",  # https://pytest-qt.readthedocs.io/en/latest/
     "napari",
-    "pyqt5",
 ]
 
 [project.entry-points."napari.manifest"]
 qhyccd-capture = "qhyccd_capture:napari.yaml"
 
 [build-system]
-requires = ["setuptools>=42.0.0", "wheel"]
+requires = ["setuptools>=42.0.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

@@ -2,6 +2,14 @@ numpy
 magicgui
 qtpy
 scikit-image
+opencv-python
+PyQt5
+matplotlib
+astropy
+psutil
+qtrangeslider
+photutils
+pybind11
 
 [testing]
 tox

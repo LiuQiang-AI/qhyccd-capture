@@ -267,27 +267,27 @@ class CameraControlWidget(QWidget):
         grid_layout = QGridLayout()
         
         self.show_settings_checkbox = QPushButton()
-        self.show_settings_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/camera_icon.png'))  # 设置图标路径
+        self.show_settings_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/camera_icon.png'))))  # 设置图标路径
         self.show_settings_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_camera_settings'])  # 设置提示文本
 
         self.show_control_checkbox = QPushButton()
-        self.show_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/instagram_icon.png'))  # 设置图标路径
+        self.show_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/instagram_icon.png'))))  # 设置图标路径
         self.show_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_capture_control'])
 
         self.show_image_control_checkbox = QPushButton()
-        self.show_image_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/film_icon.png'))  # 设置图标路径
+        self.show_image_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/film_icon.png'))))  # 设置图标路径
         self.show_image_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_image_control'])
 
         self.show_temperature_control_checkbox = QPushButton()
-        self.show_temperature_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/thermometer_icon.png'))  # 设置图标路径
+        self.show_temperature_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/thermometer_icon.png'))))  # 设置图标路径
         self.show_temperature_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_temperature_control'])
 
         self.show_CFW_control_checkbox = QPushButton()
-        self.show_CFW_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/toggle_right_icon.png'))  # 设置图标路径
+        self.show_CFW_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/toggle_right_icon.png'))))  # 设置图标路径
         self.show_CFW_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_cfw_control'])
 
         self.show_video_control_checkbox = QPushButton()
-        self.show_video_control_checkbox.setIcon(QIcon('src/qhyccd_capture/icon/video_icon.png'))  # 设置图标路径
+        self.show_video_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/video_icon.png'))))  # 设置图标路径
         self.show_video_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_video_control'])
         
         self.show_settings_checkbox.clicked.connect(lambda: self.toggle_settings_box())
