@@ -40,6 +40,7 @@ Currently, astrometry.net only supports the Ubuntu system.
 
 - 2024-10-23 Version 0.0.1 Initial version
 - 2024-10-24 Version 0.0.2 Fixed some issues introduced by the release
+- 2024-10-24 Version 0.0.3 Version changes include modified descriptions and initial configurations
 
 ## Contributing
 
