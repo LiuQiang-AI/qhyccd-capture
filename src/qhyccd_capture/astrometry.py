@@ -301,7 +301,7 @@ class AstrometrySolver(QThread):
             try:
                 # Remove all related temporary files
                 base_file = self.temp_file.rsplit('.', 1)[0]
-                for ext in ['fits', 'axy', 'corr', 'match', 'rdls', 'solved', 'wcs']:
+                for ext in ['fits', 'axy', 'corr', 'match', 'rdls', 'solved', 'wcs','new']:
                     file_to_remove = f"{base_file}.{ext}"
                     if os.path.exists(file_to_remove):
                         os.remove(file_to_remove)
