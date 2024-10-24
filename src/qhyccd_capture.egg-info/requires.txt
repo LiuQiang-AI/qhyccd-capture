@@ -8,7 +8,7 @@ matplotlib
 astropy
 psutil
 qtrangeslider
-photutils
+photutils==1.13.0
 pybind11
 
 [testing]

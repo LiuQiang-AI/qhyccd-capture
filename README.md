@@ -17,6 +17,8 @@
 - **CFW Control**: Supports CFW control and displays CFW status.
 - **Star Point Resolution**: Supports star point resolution and displays the results.
 
+![alt text](image.png)
+
 ## Installation
 You can install via pip:
 

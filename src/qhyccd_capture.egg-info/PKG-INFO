@@ -59,7 +59,7 @@ Requires-Dist: matplotlib
 Requires-Dist: astropy
 Requires-Dist: psutil
 Requires-Dist: qtrangeslider
-Requires-Dist: photutils
+Requires-Dist: photutils==1.13.0
 Requires-Dist: pybind11
 Provides-Extra: testing
 Requires-Dist: tox; extra == "testing"

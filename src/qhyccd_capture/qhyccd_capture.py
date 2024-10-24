@@ -9,7 +9,7 @@ from ctypes import *
 import os
 import warnings
 from datetime import datetime
-
+import subprocess
 import cv2
 import time
 import queue
@@ -673,13 +673,18 @@ class CameraControlWidget(QWidget):
         self.star_fwhm.setToolTip(translations[self.language]['qhyccd_capture']['star_fwhm_tooltip'])
         star_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['star_fwhm']), self.star_fwhm)
         
-        
+        self.star_analysis_choise = ['photutils']
+        if self.system_name == 'posix':
+            # 检查solve-field命令是否存在
+            try:
+                subprocess.run(['solve-field', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.star_analysis_choise.append('Astrometry')
+            except subprocess.CalledProcessError as e:
+                self.star_analysis_choise.append('Astrometry')
+
         # 星点解析方法选择
         self.star_analysis_method_selector = QComboBox()
-        self.star_analysis_method_selector.addItems([
-            'photutils',
-            'Astrometry',
-        ])
+        self.star_analysis_method_selector.addItems(self.star_analysis_choise)
         star_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['star_analysis_method']), self.star_analysis_method_selector)
         
         # 星点解析和保存表格按钮的水平布局
