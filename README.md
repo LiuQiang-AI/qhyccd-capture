@@ -17,7 +17,7 @@
 - **CFW Control**: Supports CFW control and displays CFW status.
 - **Star Point Resolution**: Supports star point resolution and displays the results.
 
-![alt text](src/qhyccd_capture/images/image.png)
+![qhyccd-capture 插件界面显示](https://raw.githubusercontent.com/LiuQiang-AI/qhyccd-capture/main/src/qhyccd_capture/images/image.png)
 
 ## Installation
 You can install via pip:

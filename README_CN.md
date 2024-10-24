@@ -17,7 +17,7 @@
 - **CFW 控制**：支持 CFW 控制，并显示 CFW 状态。
 - **星点解析**：支持星点解析，并显示星点解析结果。
   
-![alt text](src/qhyccd_capture/images/image.png)
+![qhyccd-capture 插件界面显示](https://raw.githubusercontent.com/LiuQiang-AI/qhyccd-capture/main/src/qhyccd_capture/images/image.png)
 
 ## 安装
 您可以通过pip安装:
