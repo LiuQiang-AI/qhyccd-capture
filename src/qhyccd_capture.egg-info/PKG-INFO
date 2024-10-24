@@ -1,0 +1,123 @@
+Metadata-Version: 2.1
+Name: qhyccd-capture
+Version: 0.0.3
+Summary: The basic operations for QHYCCD series cameras
+Author: QHYCCD
+Author-email: lq@qhyccd.com
+License: 
+        Copyright (c) 2024, 
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions are met:
+        
+        * Redistributions of source code must retain the above copyright notice, this
+          list of conditions and the following disclaimer.
+        
+        * Redistributions in binary form must reproduce the above copyright notice,
+          this list of conditions and the following disclaimer in the documentation
+          and/or other materials provided with the distribution.
+        
+        * Neither the name of copyright holder nor the names of its
+          contributors may be used to endorse or promote products derived from
+          this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+        AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+        IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+        FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+        DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+        CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+        OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+        OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+        
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Framework :: napari
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Image Processing
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: magicgui
+Requires-Dist: qtpy
+Requires-Dist: scikit-image
+Requires-Dist: opencv-python
+Requires-Dist: PyQt5
+Requires-Dist: matplotlib
+Requires-Dist: astropy
+Requires-Dist: psutil
+Requires-Dist: qtrangeslider
+Requires-Dist: photutils
+Requires-Dist: pybind11
+Provides-Extra: testing
+Requires-Dist: tox; extra == "testing"
+Requires-Dist: pytest; extra == "testing"
+Requires-Dist: pytest-cov; extra == "testing"
+Requires-Dist: pytest-qt; extra == "testing"
+Requires-Dist: napari; extra == "testing"
+
+# qhyccd-capture
+
+## Project Introduction
+
+`qhyccd-capture` is a basic operation library for handling QHYCCD series cameras. This library provides functionalities to interact with QHYCCD cameras, including camera connection, parameter setting, image capture, and display. This project is a [napari] plugin, aimed at simplifying the use of the camera through a graphical user interface.
+
+## Features
+
+- **Camera Connection**: Supports loading the corresponding QHYCCD dynamic link libraries on different operating systems (such as Windows, Linux, macOS) and initializing camera resources.
+- **Parameter Setting**: Provides the functionality to set camera parameters, such as exposure time, gain, offset, USB bandwidth, etc.
+- **Image Capture**: Supports single-frame mode exposure and retrieves image data.
+- **Image Display**: Displays captured images through napari, supports distributed display, single display, and sequence display modes.
+- **Histogram and White Balance**: Provides histogram equalization and white balance adjustment functions.
+- **ROI (Region of Interest)**: Supports creating and applying ROIs to operate on specific areas.
+- **Video Recording**: Supports video recording and saves in various video formats.
+- **Temperature Control**: Supports temperature control and displays temperature.
+- **CFW Control**: Supports CFW control and displays CFW status.
+- **Star Point Resolution**: Supports star point resolution and displays the results.
+
+## Installation
+You can install via pip:
+
+    pip install qhyccd-capture
+
+To install the latest development version:
+
+    pip install git+https://github.com/nightliar-L/qhyccd-capture.git
+
+## Dependency Installation
+#### Astrometry.net 
+Currently, astrometry.net only supports the Ubuntu system.
+
+    sudo apt-get install astrometry.net
+    sudo apt-get install astrometry-data-tycho2
+    sudo vim ~/.bashrc
+    # Add the following content
+    export PATH=$PATH:/usr/local/astrometry/bin
+
+## Version Changes
+
+- 2024-10-23 Version 0.0.1 Initial version
+- 2024-10-24 Version 0.0.2 Fixed some issues introduced by the release
+- 2024-10-24 Version 0.0.3 Version changes include modified descriptions and initial configurations
+
+## Contributing
+
+Contributions are very welcome. Tests can be run with [tox], please ensure
+the coverage at least stays the same before you submit a pull request.
+
+## License
+
+Distributed under the terms of the [BSD-3] license,
+"qhyccd-sdk" is free and open source software
