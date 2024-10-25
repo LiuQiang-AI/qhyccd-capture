@@ -434,7 +434,7 @@ class CameraControlWidget(QWidget):
 
         # USB 传输设置
         self.usb_traffic = QSpinBox()
-        self.usb_traffic.setSuffix(' MB/s')
+        # self.usb_traffic.setSuffix(' MB/s')
         self.usb_traffic.setRange(1, 500)  # 设置 USB 输范围
         self.usb_traffic.valueChanged.connect(self.update_usb_traffic)
         control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['usb_traffic']), self.usb_traffic)
