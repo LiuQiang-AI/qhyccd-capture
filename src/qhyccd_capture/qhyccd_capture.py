@@ -422,13 +422,13 @@ class CameraControlWidget(QWidget):
         
         # 增益设置
         self.gain = QDoubleSpinBox()
-        self.gain.setSuffix(' dB')
+        # self.gain.setSuffix(' dB')
         self.gain.valueChanged.connect(self.update_gain)
         control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['gain']), self.gain)
 
         # 偏移量设置
         self.offset = QDoubleSpinBox()
-        self.offset.setSuffix(' units')
+        # self.offset.setSuffix(' units')
         self.offset.valueChanged.connect(self.update_offset)
         control_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['offset']), self.offset)
 
