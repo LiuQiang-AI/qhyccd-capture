@@ -7,8 +7,15 @@ contributions:
     - id: qhyccd-capture.qhyccd_capture
       python_name: qhyccd_capture.qhyccd_capture:CameraControlWidget
       title: capture
+    - id: qhyccd-capture.read_raw_image
+      python_name: qhyccd_capture.read_raw_image:napari_get_reader
+      title: Open Raw Image and Display
 
   widgets:
     - command: qhyccd-capture.qhyccd_capture
       display_name: qhyccd-capture
 
+  readers:
+    - command: qhyccd-capture.read_raw_image
+      accepts_directories: false
+      filename_patterns: ['*.raw']

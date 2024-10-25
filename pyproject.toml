@@ -37,6 +37,7 @@ dependencies = [
     "qtrangeslider",
     "photutils==1.13.0",
     "pybind11",
+    "rawpy",
 ]
 
 [project.optional-dependencies]

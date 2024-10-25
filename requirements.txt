@@ -8,3 +8,4 @@ napari
 qtrangeslider
 photutils
 pybind11
+rawpy

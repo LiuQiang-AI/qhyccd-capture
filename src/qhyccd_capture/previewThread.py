@@ -48,7 +48,7 @@ class PreviewThread(QThread):
             temp_buffer = (c_ubyte * (self.image_w * self.image_h * self.image_c*(self.camera_bit//8)))()
             ret = self.qhyccddll.GetQHYCCDLiveFrame(self.camhandle, byref(w), byref(h), byref(b), byref(c), temp_buffer)
             if ret == -1:
-                time.sleep(0.001)
+                # time.sleep(0.001)
                 return 0
             if c.value != self.image_c:
                 return 0
