@@ -1882,12 +1882,12 @@ class CameraControlWidget(QWidget):
         
         if self.file_format == "fits":
                 dict_value = {
-                    "SIMPLE": "True",
+                    "SIMPLE": "T",
                     "BITPIX": imgdata_np.dtype.name,
                     "NAXIS": imgdata_np.ndim,
                     "NAXIS1": self.image_w,
                     "NAXIS2": self.image_h,
-                    "EXTEND": "False",
+                    "EXTEND": "T",
                     "DATE-OBS": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
                     "EXPTIME": f"{self.exposure_time.value():.3f} ms",
                     "TELESCOP": self.camera_name,     

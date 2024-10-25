@@ -115,11 +115,26 @@ class SaveThread(QThread):
                 # 假设 self.fits_header 是一个字典，包含要添加到FITS头的键值对
                 if self.fits_header is not None:
                     for key, header_item in self.fits_header.items():
-                        if key == 'SIMPLE':
-                            continue
-                        # 尝试将值转换为数字，如果是数字的话
-                        value = self.convert_to_number(header_item['value'])
-                        hdu.header[key] = value
+                        if key == 'SIMPLE' or key == 'EXTEND':
+                            continue  # SIMPLE 关键字通常由FITS库自动处理
+                        # 尝试将值转换为适当的格式
+                        if isinstance(header_item['value'], str):
+                            try:
+                                # 尝试转换为整数
+                                value = int(header_item['value'])
+                            except ValueError:
+                                try:
+                                    # 尝试转换为浮点数
+                                    value = float(header_item['value'])
+                                except ValueError:
+                                    # 保留为字符串
+                                    value = header_item['value']
+                        else:
+                            value = header_item['value']
+                        
+                        hdu.header[key] = value  # 设置头信息的关键字和值
+                        
+                        # 添加描述信息到头文件，如果有的话
                         if 'description' in header_item and self.language == "en":
                             hdu.header.comments[key] = header_item['description']
                 # 写入文件
