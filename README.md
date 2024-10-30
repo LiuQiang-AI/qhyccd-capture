@@ -52,4 +52,4 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"qhyccd-sdk" is free and open source software
+"qhyccd-capture" is free and open source software

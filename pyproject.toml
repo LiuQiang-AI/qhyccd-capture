@@ -35,7 +35,7 @@ dependencies = [
     "astropy",
     "psutil",
     "qtrangeslider",
-    "photutils==1.13.0",
+    "photutils>=1.11.0,<1.14.0",
     "pybind11",
 ]
 

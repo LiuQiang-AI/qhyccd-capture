@@ -51,5 +51,5 @@
 ## 许可证
 
 根据 [BSD-3] 许可证条款分发，
-"qhyccd-sdk" 是自由和开源软件
+"qhyccd-capture" 是自由和开源软件
 

@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: qhyccd-capture
-Version: 0.0.3.4
+Version: 0.0.3.5
 Summary: The basic operations for QHYCCD series cameras
 Author: QHYCCD
 Author-email: lq@qhyccd.com
@@ -59,9 +59,8 @@ Requires-Dist: matplotlib
 Requires-Dist: astropy
 Requires-Dist: psutil
 Requires-Dist: qtrangeslider
-Requires-Dist: photutils==1.13.0
+Requires-Dist: photutils<1.14.0,>=1.11.0
 Requires-Dist: pybind11
-Requires-Dist: rawpy
 Provides-Extra: testing
 Requires-Dist: tox; extra == "testing"
 Requires-Dist: pytest; extra == "testing"

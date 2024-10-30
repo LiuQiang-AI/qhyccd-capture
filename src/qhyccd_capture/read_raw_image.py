@@ -107,7 +107,7 @@ def raw_file_reader(path: str) -> List[LayerData]:
             raw_data = file.read()
     except IOError as e:
         print(f"无法读取文件: {e}")
-        return [(np.array([]).reshape(0, 0), {}, 'image')]  # 返回包含空图像层的列表
+        return None  # 返回包含空图像层的列表
     file_name = Path(path).stem
     pixel_count = len(raw_data) // 2
 
@@ -117,7 +117,7 @@ def raw_file_reader(path: str) -> List[LayerData]:
         width, height, bit_depth, endianness = dialog.getDimensions()
         if width <= 0 or height <= 0 or bit_depth <= 0 or endianness not in [0, 1]:
             print("输入的尺寸无效。")
-            return [(np.array([]).reshape(0, 0), {}, 'image')]  # 返回包含空图像层的列表
+            return None  # 返回包含空图像层的列表
 
         # 处理图像数据
         try:
@@ -127,7 +127,7 @@ def raw_file_reader(path: str) -> List[LayerData]:
                 data = np.frombuffer(raw_data, dtype=np.uint16).byteswap().reshape((height, width))
         except ValueError as e:
             print(f"尺寸与数据不匹配: {e}")
-            return [(np.array([]).reshape(0, 0), {}, 'image')]  # 返回包含空图像层的列表
+            return None  # 返回包含空图像层的列表
 
         # 根据位数调整数据
         if bit_depth < 16:
@@ -139,7 +139,7 @@ def raw_file_reader(path: str) -> List[LayerData]:
         return [(data, layer_attributes, 'image')]
     else:
         print("用户取消操作。")
-        return [(np.array([]).reshape(0, 0), {}, 'image')]  # 用户取消时返回空图像层列表
+        return None  # 用户取消时返回空图像层列表
 
 def napari_get_reader(path: str) -> Optional[Callable[[str], List[LayerData]]]:
     if isinstance(path, str) and path.endswith('.raw'):
