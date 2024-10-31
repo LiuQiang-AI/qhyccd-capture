@@ -10,6 +10,7 @@ psutil
 qtrangeslider
 photutils<1.14.0,>=1.11.0
 pybind11
+pyqtgraph
 
 [testing]
 tox

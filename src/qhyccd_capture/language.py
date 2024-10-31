@@ -153,6 +153,8 @@ translations = {
             'no_detected_stars': 'No Detected Stars',
             'cancel_solving': 'Cancel Solving.',
             'star_table_saved': 'Star Table Saved to',
+            'stop_preview': 'Stop Preview',
+            'start_preview': 'Start Preview',
         },
         'setting': {
             'settings': 'Settings',
@@ -517,6 +519,8 @@ translations = {
             'cancel_solving': '取消解析。',
             'star_table_saved': '星点表格已保存到',
             'no_image_layer': '没有图像图层',
+            'stop_preview': '停止预览',
+            'start_preview': '开始预览',
         },       
         'setting': {
             'settings': '设置',

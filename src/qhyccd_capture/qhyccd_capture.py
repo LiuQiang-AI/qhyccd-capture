@@ -2545,6 +2545,7 @@ class CameraControlWidget(QWidget):
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
                 self.append_text(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+                return
             # 根据位深和颜色模式确定数据类型和大小
             dtype_code = 'H' if self.camera_bit == 16 else 'B'  # 'H' 对应 ctypes.c_uint16，'B' 对应 ctypes.c_ubyte
             
@@ -2563,6 +2564,7 @@ class CameraControlWidget(QWidget):
             self.preview_thread.frame_captured.connect(self.data_received)  # 连接信号到槽函数
             self.preview_thread.start()
             self.preview_checkbox.setChecked(True)
+            self.append_text(translations[self.language]["qhyccd_capture"]["start_preview"])
             
     def stop_preview(self):
         if self.preview_thread is not None:
@@ -2570,9 +2572,11 @@ class CameraControlWidget(QWidget):
             if ret != 0:
                 warnings.warn(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
                 self.append_text(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+                return
             self.preview_thread.stop()
             self.preview_checkbox.setChecked(False)
             self.preview_thread = None
+            self.append_text(translations[self.language]["qhyccd_capture"]["stop_preview"])
         if 'QHY-Preview' in self.viewer.layers:
             self.viewer.layers.remove('QHY-Preview')
         

@@ -61,6 +61,7 @@ Requires-Dist: psutil
 Requires-Dist: qtrangeslider
 Requires-Dist: photutils<1.14.0,>=1.11.0
 Requires-Dist: pybind11
+Requires-Dist: pyqtgraph
 Provides-Extra: testing
 Requires-Dist: tox; extra == "testing"
 Requires-Dist: pytest; extra == "testing"

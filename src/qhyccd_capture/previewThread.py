@@ -82,3 +82,4 @@ class PreviewThread(QThread):
     def stop(self):
         self.running = False
         self.update_fps()
+        self.quit()
