@@ -2961,7 +2961,7 @@ class CameraControlWidget(QWidget):
             for layer in selected_layers:
                 if layer.name == 'QHY-Preview':
                     self.histogram_layer_name = layer.name
-        print(f"self.histogram_layer_name: {self.histogram_layer_name}")
+        # print(f"self.histogram_layer_name: {self.histogram_layer_name}")
         if self.histogram_layer_name is not None and self.histogram_layer_name != 'QHY-Preview':
             imgdata_np = self.viewer.layers[self.histogram_layer_name].data
             if imgdata_np.ndim == 4 :

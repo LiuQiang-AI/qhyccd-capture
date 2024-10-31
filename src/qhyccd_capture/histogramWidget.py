@@ -30,6 +30,8 @@ class HistogramWidget(QWidget):
         self.histogram = None
         self.min_line = None
         self.max_line = None
+        self.is_updating_histogram = False
+        self.histogram_update_lock = threading.Lock()
 
         self.hide()  # Initialize hidden window
 
@@ -45,7 +47,13 @@ class HistogramWidget(QWidget):
 
     def update_histogram(self):
         """Update histogram with optimized drawing in a separate thread to avoid UI freeze."""
-        with self.update_lock:
+        if not self.try_enter_update():
+            # 如果正在更新中，则从缓冲区获取并丢弃一个数据，以避免缓冲区过满
+            skipped_data = self.img_buffer.get()  # 获取并丢弃数据
+            print(f"直方图更新正在进行中，跳过这次更新，丢弃数据: {skipped_data.shape if skipped_data is not None else '无数据'}")
+            return
+
+        try:
             imgdata_np = self.img_buffer.get()
             if imgdata_np is None:
                 return
@@ -67,7 +75,21 @@ class HistogramWidget(QWidget):
                 colors = ['r', 'g', 'b']
                 for i, color in enumerate(colors):
                     self.plot_single_channel_histogram(imgdata_np[:, :, i], bins_number, bins_range, color)
+        finally:
+            self.leave_update()
 
+    def try_enter_update(self):
+        """尝试进入更新状态，如果已经在更新中则返回 False。"""
+        with self.histogram_update_lock:
+            if self.is_updating_histogram:
+                return False
+            self.is_updating_histogram = True
+            return True
+
+    def leave_update(self):
+        """离开更新状态，允许其他线程进入更新。"""
+        with self.histogram_update_lock:
+            self.is_updating_histogram = False
 
     def clear_histogram_plots(self):
         """清除图表中的直方图曲线，保留其他图形元素如线条。"""
