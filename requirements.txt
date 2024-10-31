@@ -8,3 +8,4 @@ napari
 qtrangeslider
 photutils==1.11.0
 pybind11
+pyqtgraph
