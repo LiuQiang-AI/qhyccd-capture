@@ -353,7 +353,13 @@ translations = {
             'save_image_failed': 'Save Image Failed',
             'set_qhyccd_debayer_mode_failed': 'Set QHYCCD Debayer Mode Failed',
             'set_qhyccd_auto_white_balance_failed': 'Set QHYCCD Auto White Balance Failed',
-
+            'append_text_failed': 'Append Text Failed',
+            'show_settings_dialog_failed': 'Show Settings Dialog Failed',
+            'load_settings_failed': 'Load Settings Failed',
+            'on_camera_mode_changed_failed': 'On Camera Mode Changed Failed',
+            'connect_camera_failed': 'Connect Camera Failed',
+            'already_connected_signal_failed': 'Already Connected Signal , init ui failed',
+            'disconnect_camera_failed': 'Disconnect Camera Failed',
         },
 
     },
@@ -710,7 +716,14 @@ translations = {
             'get_qhyccd_single_frame_failed': '获取单帧图像数据失败',
             'save_image_failed': '图像保存失败',
             'set_qhyccd_debayer_mode_failed': '设置相机Debayer模式失败',
-            'set_qhyccd_auto_white_balance_failed':  '设置自动白平衡失败'
+            'set_qhyccd_auto_white_balance_failed':  '设置自动白平衡失败',
+            'append_text_failed': '向QTextEdit添加文本失败',
+            'show_settings_dialog_failed': '显示设置对话框失败',
+            'load_settings_failed': '加载设置失败',
+            'on_camera_mode_changed_failed': '相机模式改变失败',
+            'connect_camera_failed': '连接相机失败',
+            'already_connected_signal_failed': '已连接信号,初始化UI失败',
+            'disconnect_camera_failed': '断开相机连接失败',
         },
     },
 }

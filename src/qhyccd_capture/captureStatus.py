@@ -36,7 +36,7 @@ class CaptureStatusThread(QThread):
                     self.end_capture.emit()
                     paused_signal_sent = True  # 设置标志位，避免重复发送
             self.mutex.unlock()  # 解锁
-            self.msleep(300)
+            time.sleep(0.1)
 
     def pause_capture(self):
         self.mutex.lock()  # 锁定

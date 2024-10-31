@@ -44,6 +44,7 @@ class CameraControlWidget(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
         self.viewer = napari_viewer
+        self.viewer.layers.selection.events.changed.connect(self.on_selection_changed)
         self.initialize_settings()
         self.initialize_histogram_and_memory_monitor()
         self.initialize_state()
@@ -90,6 +91,7 @@ class CameraControlWidget(QWidget):
         self.contrast_limits_connection = None
         
         self.histogram_window = None  # 用于存储直方图窗口
+        self.histogram_layer_name = None # 用于存储直方图显示的图层名称
 
         self.camera = None
         self.camera_name = None
@@ -231,8 +233,11 @@ class CameraControlWidget(QWidget):
         self.reset_camera_button = QPushButton(translations[self.language]['qhyccd_capture']['reset_camera'])
         
         self.connect_button.clicked.connect(self.connect_camera)
+        self.connect_button.setEnabled(False)
         self.disconnect_button.clicked.connect(self.disconnect_camera)
+        self.disconnect_button.setEnabled(False)
         self.reset_camera_button.clicked.connect(self.read_camera_name)
+        self.reset_camera_button.setEnabled(False)
         
         grid_layout.addWidget(self.connect_button,0,0)
         grid_layout.addWidget(self.disconnect_button,0,1)
@@ -458,6 +463,7 @@ class CameraControlWidget(QWidget):
         self.start_button = QPushButton(translations[self.language]['qhyccd_capture']['start_capture'])
         self.save_button = QPushButton(translations[self.language]['qhyccd_capture']['save'])
         self.save_button.setToolTip(translations[self.language]['qhyccd_capture']['save_tooltip'])
+        self.save_button.setVisible(False) # 默认隐藏保存按钮 -------------------------------------
         self.start_button.clicked.connect(self.start_capture)
         self.save_button.clicked.connect(self.save_image)
         grid_layout.addWidget(self.start_button,0,0)
@@ -772,11 +778,6 @@ class CameraControlWidget(QWidget):
         self.CFW_control_box.setVisible(False)
         self.video_control_box.setVisible(False)
         
-        # 初始化SDK
-        self.connect_button.setEnabled(False)
-        self.disconnect_button.setEnabled(False)
-        self.reset_camera_button.setEnabled(False)
-        
         # 禁用复选框
         self.show_settings_checkbox.setEnabled(False)
         self.show_control_checkbox.setEnabled(False)
@@ -786,28 +787,35 @@ class CameraControlWidget(QWidget):
         self.show_video_control_checkbox.setEnabled(False)    
     
     def append_text(self, text):
-        # 向 QTextEdit 添加文本
-        self.state_label.append(text)
-        now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"{now_time}: {text}")
-        # # 自动滚动到底部
-
-        self.state_label.moveCursor(QTextCursor.End)
-        self.state_label.moveCursor(QTextCursor.StartOfLine) # 滚动到最左边
+        try:
+            # 向 QTextEdit 添加文本
+            self.state_label.append(text)
+            now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{now_time}: {text}")
+            # 自动滚动到底部
+            self.state_label.moveCursor(QTextCursor.End)
+            self.state_label.moveCursor(QTextCursor.StartOfLine) # 滚动到最左边
+        except Exception as e:
+            self.append_text(f"{translations[self.language]['debug']['append_text_failed']}: {e}")
     
     def show_settings_dialog(self):
-        self.settings_dialog.exec_()
+        try:
+            self.settings_dialog.exec_()
+        except Exception as e:
+            self.append_text(f"{translations[self.language]['debug']['show_settings_dialog_failed']}: {e}")
         
     def load_settings(self):
-        if os.path.exists(self.settings_file):
-            with open(self.settings_file, 'r') as f:
-                settings = json.load(f)
-                self.qhyccd_path = settings.get("qhyccd_path", "")
-                self.language = settings.get("language", "zh")
-        else:
-            self.qhyccd_path = ""
-            self.language = "zh"  # 默认语言
-        # self.append_text(translations[self.language]['qhyccd_capture']['settings_loaded'])
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    settings = json.load(f)
+                    self.qhyccd_path = settings.get("qhyccd_path", "")
+                    self.language = settings.get("language", "zh")
+            else:
+                self.qhyccd_path = ""
+                self.language = "zh"  # 默认语言
+        except Exception as e:
+            self.append_text(f"{translations[self.language]['debug']['load_settings_failed']}: {e}")
             
     # 初始化QHYCCD资源
     def init_qhyccdResource(self,file_path=None):
@@ -962,20 +970,23 @@ class CameraControlWidget(QWidget):
          
         # self.read_camera_name()
         
+        self.disconnect_button.setEnabled(False)
         self.connect_button.setEnabled(True)
-        self.disconnect_button.setEnabled(True)
         self.reset_camera_button.setEnabled(True)
 
         self.init_state = True
         
     # 读取模式变化逻辑
     def on_camera_mode_changed(self):
-        self.camera_mode = self.camera_mode_selector.currentText()
-        # print(f"self.camera_mode:{self.camera_mode}")
-        if self.camhandle != 0 or self.camera_state:
-            self.disconnect_camera()
-            self.connect_camera()
-        self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_mode"]}')
+        try:
+            self.camera_mode = self.camera_mode_selector.currentText()
+            # print(f"self.camera_mode:{self.camera_mode}")
+            if self.camhandle != 0 or self.camera_state:
+                self.disconnect_camera()
+                self.connect_camera()
+            self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_mode"]}')
+        except Exception as e:
+            self.append_text(f"{translations[self.language]['debug']['on_camera_mode_changed_failed']}: {e}")
 
     # 创建一个方法来更新进度条
     def update_memory_progress(self, used_memory):
@@ -1021,22 +1032,29 @@ class CameraControlWidget(QWidget):
         self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_name"]}')
     # 连接相机
     def connect_camera(self,mode=0):
-        self.connect_button.setEnabled(False)
-        start_time = time.time()
-        if self.camhandle != 0:
-            self.disconnect_camera()
-        if not self.init_state:
-            self.init_qhyccdResource()
-        camera_name = self.camera_selector.currentText()
-        self.camera_name = camera_name
-        
-        self.camera_connection_thread = CameraConnectionThread(self.qhyccddll, self.camera_ids[camera_name],mode,self.camera_mode_ids[self.camera_mode], self.language,self)
-        self.camera_connection_thread.handle_signal.connect(self.handle_signal)
-        self.camera_connection_thread.get_read_mode_signal.connect(self.get_read_mode_signal)
-        self.camera_connection_thread.update_status_signal.connect(self.append_text)
-        self.camera_connection_thread.already_connected_signal.connect(self.already_connected_signal)
-        self.camera_connection_thread.already_disconnected_signal.connect(self.already_disconnected_signal)
-        self.camera_connection_thread.start()
+        try:
+            start_time = time.time()
+            if self.camhandle != 0:
+                self.disconnect_camera()
+            if not self.init_state:
+                self.init_qhyccdResource()
+            self.reset_camera_button.setEnabled(False)
+            self.connect_button.setEnabled(False)
+            self.disconnect_button.setEnabled(False)
+            camera_name = self.camera_selector.currentText()
+            self.camera_name = camera_name
+            self.camera_connection_thread = CameraConnectionThread(self.qhyccddll, self.camera_ids[camera_name],mode,self.camera_mode_ids[self.camera_mode], self.language,self)
+            self.camera_connection_thread.handle_signal.connect(self.handle_signal)
+            self.camera_connection_thread.get_read_mode_signal.connect(self.get_read_mode_signal)
+            self.camera_connection_thread.update_status_signal.connect(self.append_text)
+            self.camera_connection_thread.already_connected_signal.connect(self.already_connected_signal)
+            self.camera_connection_thread.already_disconnected_signal.connect(self.already_disconnected_signal)
+            self.camera_connection_thread.start()
+        except Exception as e:
+            self.connect_button.setEnabled(True)
+            self.reset_camera_button.setEnabled(True)
+            self.disconnect_button.setEnabled(False)
+            self.append_text(f"{translations[self.language]['debug']['connect_camera_failed']}: {e}")
       
     def handle_signal(self,signal):
         self.camhandle = int(signal)
@@ -1046,53 +1064,67 @@ class CameraControlWidget(QWidget):
         self.camera_read_mode_ids = read_mode
         
     def already_connected_signal(self,connected,read_mode):
-        if not connected:
-            # self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
-            warnings.warn(f"{translations[self.language]['debug']['camera_connected_failed']}")
-            self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
-            return
-        # 更新参数
-        self.update_camera_color()
-        self.update_camera_config()
-        self.update_limit_selector()
-        self.update_readout_mode_selector(read_mode)
-        self.update_camera_pixel_bin(bin=bin)
-        self.update_depth_selector()
-        self.update_debayer_mode()
-        self.update_resolution(0,0,self.image_w,self.image_h)
-        self.update_camera_mode()
-        self.update_camera_temperature()
-        self.update_CFW_control()
-        self.update_tiff_compression()
-        self.start_capture_status_thread()
-        self.update_auto_exposure()
-        self.update_auto_white_balance()
-        # 启用复选框
-        self.show_settings_checkbox.setEnabled(True)
-        self.show_control_checkbox.setEnabled(True)
-        self.show_image_control_checkbox.setEnabled(True)
+        try:
+            if not connected:
+                # self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
+                self.connect_button.setEnabled(True)
+                self.reset_camera_button.setEnabled(True)
+                self.disconnect_button.setEnabled(False)
+                warnings.warn(f"{translations[self.language]['debug']['camera_connected_failed']}")
+                self.append_text(f"{translations[self.language]['debug']['camera_connected_failed']}")
+                return
+            # 更新参数
+            self.update_camera_color()
+            self.update_camera_config()
+            self.update_limit_selector()
+            self.update_readout_mode_selector(read_mode)
+            self.update_camera_pixel_bin(bin=bin)
+            self.update_depth_selector()
+            self.update_debayer_mode()
+            self.update_resolution(0,0,self.image_w,self.image_h)
+            self.update_camera_mode()
+            self.update_camera_temperature()
+            self.update_CFW_control()
+            self.update_tiff_compression()
+            self.start_capture_status_thread()
+            self.update_auto_exposure()
+            self.update_auto_white_balance()
+            # 启用复选框
+            self.show_settings_checkbox.setEnabled(True)
+            self.show_control_checkbox.setEnabled(True)
+            self.show_image_control_checkbox.setEnabled(True)
+            
+            # 显示复选框
+            self.toggle_settings_box(True)
+            self.toggle_control_box(True)
+            self.toggle_image_control_box(True)
+            
+            self.camera_state = True
+  
+            
+            self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["connected"]}')
+            self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
+            
+            # 初始禁用自动白平衡和自动曝光按钮
+            self.auto_white_balance_button.setVisible(False)
+            self.auto_exposure_button.setVisible(False)
+            
+            self.reset_camera_button.setEnabled(False)
+            self.connect_button.setEnabled(False)
+            self.disconnect_button.setEnabled(True)
+        except Exception as e:
+            self.disconnect()
+            self.connect_button.setEnabled(True)
+            self.reset_camera_button.setEnabled(True)
+            self.disconnect_button.setEnabled(False)
+            self.append_text(f"{translations[self.language]['debug']['already_connected_signal_failed']}: {e}")
         
-        # 显示复选框
-        self.toggle_settings_box(True)
-        self.toggle_control_box(True)
-        self.toggle_image_control_box(True)
-        
-        self.camera_state = True
-        self.connect_button.setEnabled(False)
-        self.reset_camera_button.setEnabled(False)
-        
-        self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["connected"]}')
-        self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
-        self.connect_button.setEnabled(True)
-        
-        # 初始禁用自动白平衡和自动曝光按钮
-        self.auto_white_balance_button.setVisible(False)
-        self.auto_exposure_button.setVisible(False)
-    
-    def already_disconnected_signal(self,disconnected):
+    def already_disconnected_signal(self, disconnected):
         if not disconnected:
+            self.connect_button.setEnabled(False)
+            self.reset_camera_button.setEnabled(False)
+            self.disconnect_button.setEnabled(True)
             return
-        
         self.camhandle = 0
         self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["disconnected"]}')
         self.config_label.setStyleSheet("color: red;")  # 设置字体颜色为红色
@@ -1101,13 +1133,14 @@ class CameraControlWidget(QWidget):
         self.current_image_name = None
         try:    
             if self.is_color_camera:    
-                # 断开连接信号
                 for slider in [self.wb_red, self.wb_green, self.wb_blue]:
                     slider.valueChanged.disconnect()  # 断开之前的连接
         except Exception as e:
             warnings.warn(f"{translations[self.language]['debug']['disconnect_white_balance_failed']}: {e}")
             self.append_text(f"{translations[self.language]['debug']['disconnect_white_balance_failed']}: {e}")
+        
         self.init_state = False
+        
         # 初始化所有区域为隐藏状态
         self.settings_box.setVisible(False)
         self.control_box.setVisible(False)
@@ -1115,6 +1148,7 @@ class CameraControlWidget(QWidget):
         self.temperature_control_box.setVisible(False)
         self.CFW_control_box.setVisible(False)
         self.video_control_box.setVisible(False)
+        
         # 取消选项
         self.toggle_settings_box(False)
         self.toggle_control_box(False)
@@ -1130,27 +1164,34 @@ class CameraControlWidget(QWidget):
         self.show_temperature_control_checkbox.setEnabled(False)
         self.show_CFW_control_checkbox.setEnabled(False)
         self.show_video_control_checkbox.setEnabled(False)
+        
         self.camera_state = False
         
         self.temperature_update_timer.stop()
-        self.connect_button.setEnabled(True)
         
-        self.reset_camera_button.setEnabled(True)
+
         
         self.settings_dialog.camera_info_label.setText(f'{translations[self.language]["qhyccd_capture"]["camera_info_disconnected"]}')
-        self.stop_preview()
-        self.disconnect_button.setEnabled(True)
+        
+        self.disconnect_button.setEnabled(False)
+        self.reset_camera_button.setEnabled(True)
+        self.connect_button.setEnabled(True)
 
     def disconnect_camera(self):
         """断开相机连接"""
-        if self.camhandle == 0:
-            return
-        self.disconnect_button.setEnabled(False)
-        if self.capture_in_progress:
-            self.cancel_capture()
-
-        self.camera_connection_thread.disconnect()
-        self.camera_connection_thread.wait()
+        try:    
+            if self.camhandle == 0:
+                return
+            self.disconnect_button.setEnabled(False)
+            if self.capture_in_progress:
+                self.cancel_capture()
+            if self.preview_thread is not None:
+                self.stop_preview()
+                
+            self.camera_connection_thread.disconnect()
+        except Exception as e:
+            self.disconnect_button.setEnabled(True)
+            self.append_text(f"{translations[self.language]['debug']['disconnect_camera_failed']}: {e}")
 
     def start_capture_status_thread(self):
         if self.capture_status_thread is None:
@@ -1858,8 +1899,7 @@ class CameraControlWidget(QWidget):
         self.capture_in_progress = True
         self.start_button.setText(translations[self.language]["qhyccd_capture"]["cancel_capture"])
         self.capture_status_thread.resume_capture()
-        
-        # print("开始拍摄")
+        self.append_text(translations[self.language]["qhyccd_capture"]["start_capture"])
         self.update_exposure_time()
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
             self.capture_thread = CaptureThread(
@@ -1869,8 +1909,7 @@ class CameraControlWidget(QWidget):
             self.capture_thread.start()
         elif self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.on_capture_finished(self.preview_image)
-        self.append_text(translations[self.language]["qhyccd_capture"]["start_capture"])
-            
+           
     def on_capture_finished(self, imgdata_np):
         if not self.capture_in_progress :
             return
@@ -1986,45 +2025,31 @@ class CameraControlWidget(QWidget):
                 self.viewer.layers.remove(layer)
                 # 重新添加图层到列表末尾，使其显示在最上层
                 self.viewer.layers.append(layer)
-                # 设置为当前活跃的图层
-                self.viewer.layers.selection.active = layer
-                            # 定位显示拍摄的最后一张图片
+                # 定位显示拍摄的最后一张图片
                 self.viewer.layers[self.current_image_name].refresh()
                 self.viewer.dims.set_point(0, self.current_image.shape[0] - 1)
             else:
                 # 移动图层到最上层
                 self.viewer.layers.move(current_index, top_index)
-            # 设置为当前活跃的图层
-            self.viewer.layers.selection.active = layer
+            if self.histogram_layer_name != self.current_image_name:
+                # 设置为当前活跃的图层
+                self.viewer.layers.selection.active = layer
+            else:
+                self.on_selection_changed(None)
             
-        self.contrast_limits_name = self.current_image_name
-        
-        self.bind_contrast_limits_event()
-
         self.append_text(translations[self.language]["qhyccd_capture"]["capture_finished"])
         
         self.capture_in_progress = False
         self.start_button.setText(translations[self.language]["qhyccd_capture"]["start_capture"])
         self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_finished"])
-        if display_mode == translations[self.language]["qhyccd_capture"]["sequential_display"]:
-            if sequential_display_ndim == 2:
-                self.img_buffer.put(imgdata_np[-1,:,:,-1])
-            elif sequential_display_ndim == 3:
-                self.img_buffer.put(imgdata_np[-1])
-            else:
-                self.img_buffer.put(imgdata_np)
-        else:
-            self.img_buffer.put(imgdata_np)
-        self.histogram_widget.update_histogram()
-        # self.capture_status_thread.pause_capture()
 
     def cancel_capture(self):
         self.capture_in_progress = False
         self.start_button.setText(translations[self.language]["qhyccd_capture"]["start_capture"])
         self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_canceled"])
         self.append_text(translations[self.language]["qhyccd_capture"]["cancel_capture"])
-        self.capture_status_thread.pause_capture()
         self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle)
+        self.capture_status_thread.pause_capture()
         # print("拍摄已取消")
 
     def save_image(self):
@@ -2058,7 +2083,6 @@ class CameraControlWidget(QWidget):
         return minValue.value,maxValue.value,step.value
     
     def update_exposure_time(self):
-        
         # 处理曝光时间变化的逻辑
         exposure_time = int(self.exposure_time.value()*1000)
         # print(f"exposure_time:{exposure_time},{type(exposure_time)}")
@@ -2068,6 +2092,8 @@ class CameraControlWidget(QWidget):
         else:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_exposure_time_failed']}: {ret}")
             self.append_text(f"{translations[self.language]['debug']['set_qhyccd_exposure_time_failed']}: {ret}")
+        if self.preview_thread:
+            self.preview_thread.update_fps()
         return ret
     
     def update_gain(self, value):
@@ -2095,6 +2121,8 @@ class CameraControlWidget(QWidget):
         else:
             warnings.warn(f"{translations[self.language]['debug']['set_qhyccd_usb_traffic_failed']}: {ret}")
             self.append_text(f"{translations[self.language]['debug']['set_qhyccd_usb_traffic_failed']}: {ret}")
+        if self.preview_thread:
+            self.preview_thread.update_fps()
         return ret
          
     def show_roi_component(self):
@@ -2550,8 +2578,6 @@ class CameraControlWidget(QWidget):
         
     def data_received(self, fps):
         with self.lock:
-            if self.top_checkbox.isChecked():
-                self.contrast_limits_name = 'QHY-Preview'
             dtype = np.uint16 if self.camera_bit == 16 else np.uint8
             shape = (self.image_h, self.image_w, 3) if self.is_color_camera and self.Debayer_mode  else (self.image_h, self.image_w)
             imgdata_np = np.frombuffer(self.shared_image_data, dtype=dtype).reshape(shape)
@@ -2651,11 +2677,16 @@ class CameraControlWidget(QWidget):
             self.update_viewer(imgdata_np, fps)
             self.last_update_time = current_time
             
-        if (self.last_histogram_update_time is None or current_time - self.last_histogram_update_time > 1) and self.top_checkbox.isChecked():
+        if (self.last_histogram_update_time is None or current_time - self.last_histogram_update_time > 0.1) and self.histogram_layer_name == "QHY-Preview":
             self.img_buffer.put(imgdata_np)
             self.histogram_widget.update_histogram()
             self.last_histogram_update_time = current_time
-
+            if self.contrast_limits_name != 'QHY-Preview':
+                self.contrast_limits_name = 'QHY-Preview'
+                self.bind_contrast_limits_event()
+                contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
+                self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
+                
     def update_viewer(self, imgdata_np, fps):
         layer_name = 'QHY-Preview'
         
@@ -2667,59 +2698,31 @@ class CameraControlWidget(QWidget):
 
         self.fps_label.setText(f'FPS: {fps:.2f}')
         
-        if imgdata_np.shape[1] > 1000:
-            img_with_fps = imgdata_np.copy()
-            
-            # 设置文本位置
-            text_position = (img_with_fps.shape[1] - int(img_with_fps.shape[1] / 100 * 15), int(img_with_fps.shape[0] / 100 * 3))
-            
-            # 创建半透明背景
-            overlay = imgdata_np.copy()
-            max_value = 65535 if img_with_fps.dtype == np.uint16 else 255
-            text = f'FPS: {fps:.2f}'
-            font_scale = 0.7 * (img_with_fps.shape[1] / 1000)
-            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)
-            cv2.rectangle(overlay, 
-                          (text_position[0] - 10, text_position[1] - text_height - 10), 
-                          (text_position[0] + text_width + 10, text_position[1] + 10), 
-                          (0, 0, 0), -1)  # 黑色背景
-
-            # 在图像上绘制 FPS
-            contrast_color = (max_value, max_value, max_value)  # 白色文本
-            cv2.putText(overlay, text, text_position, 
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, contrast_color, 2, cv2.LINE_AA)
-
-            # 将半透明背景叠加到原图像上
-            cv2.addWeighted(overlay, 0.5, img_with_fps, 0.5, 0, img_with_fps)
-        else:
-            img_with_fps = imgdata_np
-        
         if layer_name in self.viewer.layers:
-            if self.viewer.layers[layer_name].data.shape == img_with_fps.shape:
-                self.viewer.layers[layer_name].data = img_with_fps
+            if self.viewer.layers[layer_name].data.shape == imgdata_np.shape:
+                self.viewer.layers[layer_name].data = imgdata_np
             else:
                 self.viewer.layers.remove(layer_name)
-                self.viewer.add_image(img_with_fps, name=layer_name)
+                self.viewer.add_image(imgdata_np, name=layer_name)
                 if self.camera_bit == 16:
                     self.viewer.layers[layer_name].contrast_limits = (0, 65535)
                 else:
                     self.viewer.layers[layer_name].contrast_limits = (0, 255)
         else:
-            self.viewer.add_image(img_with_fps, name=layer_name)
+            self.viewer.add_image(imgdata_np, name=layer_name)
             if self.camera_bit == 16:
                 self.viewer.layers[layer_name].contrast_limits = (0, 65535)
             else:
                 self.viewer.layers[layer_name].contrast_limits = (0, 255)
-        # print(f"layer_name: {layer_name}")
+
         # 如果需要将图层移动到顶部，可以使用以下方法
         if self.top_checkbox.isChecked():  # 检查复选框状态
             layer_index = self.viewer.layers.index(layer_name)  # 获取图层的索引
-            self.viewer.layers.move(layer_index, -1)  # 将图层移动到索引0的位置
+            self.viewer.layers.move(layer_index, -1)  # 将图层移动到索引-1的位置
             self.bind_contrast_limits_event()
 
     def bind_contrast_limits_event(self):
         # 绑定当前图层的对比度限制变化事件
-        
         current_layer = self.viewer.layers[self.contrast_limits_name]
         try:
             self.contrast_limits_connection = current_layer.events.contrast_limits.connect(self.on_contrast_limits_change)
@@ -2944,6 +2947,43 @@ class CameraControlWidget(QWidget):
                     row_data = [self.star_table.item(row, col).text() for col in range(self.star_table.columnCount())]
                     writer.writerow(row_data)
             self.append_text(f"{translations[self.language]['qhyccd_capture']['star_table_saved']}: {file_path}")
+        
+    def on_selection_changed(self,event):
+        selected_layers = self.viewer.layers.selection
+        if len(selected_layers) == 1:
+            for layer in selected_layers:
+                self.histogram_layer_name = layer.name
+        elif len(selected_layers) > 1:
+            for layer in selected_layers:
+                if layer.name == 'QHY-Preview':
+                    self.histogram_layer_name = layer.name
+        print(f"self.histogram_layer_name: {self.histogram_layer_name}")
+        if self.histogram_layer_name is not None and self.histogram_layer_name != 'QHY-Preview':
+            imgdata_np = self.viewer.layers[self.histogram_layer_name].data
+            if imgdata_np.ndim == 4 :
+                current_time_index = self.viewer.dims.current_step[0] 
+                self.viewer.dims.events.current_step.connect(self.on_time_index_change)
+                imgdata_np = imgdata_np[current_time_index]
+                if np.array_equal(imgdata_np[:,:,0], imgdata_np[:,:,1]) and np.array_equal(imgdata_np[:,:,1], imgdata_np[:,:,2]):
+                    imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_BGR2GRAY)
+            else:
+                self.viewer.dims.events.current_step.disconnect(self.on_time_index_change)
+            self.contrast_limits_name = self.histogram_layer_name
+            self.bind_contrast_limits_event()
+            contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
+            self.img_buffer.put(imgdata_np)
+            self.histogram_widget.update_histogram()
+            self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
+            
+    def on_time_index_change(self,event):
+        current_time_index = self.viewer.dims.current_step[0] 
+        imgdata_np = self.viewer.layers[self.histogram_layer_name].data[current_time_index]
+        if np.array_equal(imgdata_np[:,:,0], imgdata_np[:,:,1]) and np.array_equal(imgdata_np[:,:,1], imgdata_np[:,:,2]):
+            imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_BGR2GRAY)
+        self.img_buffer.put(imgdata_np)
+        self.histogram_widget.update_histogram()
+        
+        
         
 @napari_hook_implementation
 def napari_experimental_provide_dock_widget():

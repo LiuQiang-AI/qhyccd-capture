@@ -38,6 +38,9 @@ class PreviewThread(QThread):
                     fps = 0.0
                 self.frame_captured.emit(fps)
 
+    def update_fps(self):
+        self.frame_times.clear()
+
     def capture_frame(self):
         w = ctypes.c_uint32()
         h = ctypes.c_uint32()
@@ -78,4 +81,4 @@ class PreviewThread(QThread):
 
     def stop(self):
         self.running = False
-        self.wait()
+        self.update_fps()

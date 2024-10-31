@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: qhyccd-capture
-Version: 0.0.3.5
+Version: 0.0.3.6
 Summary: The basic operations for QHYCCD series cameras
 Author: QHYCCD
 Author-email: lq@qhyccd.com
@@ -122,4 +122,4 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"qhyccd-sdk" is free and open source software
+"qhyccd-capture" is free and open source software
