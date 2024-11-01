@@ -2287,7 +2287,7 @@ class CameraControlWidget(QWidget):
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and len(self.viewer.layers) > 0 and self.viewer.layers[-1].name.startswith('QHY') and imgdata_np.ndim == self.viewer.layers[-1].data.ndim:
             self.viewer.layers[-1].data = imgdata_np
             self.img_buffer.put(imgdata_np)
-            self.histogram_widget.update_histogram()
+            # self.histogram_widget.update_histogram()
     
     def apply_white_balance_software(self, imgdata_np=None, red_gain=None, green_gain=None, blue_gain=None):
         if imgdata_np is None:
@@ -2683,7 +2683,7 @@ class CameraControlWidget(QWidget):
             
         if (self.last_histogram_update_time is None or current_time - self.last_histogram_update_time > 0.1) and self.histogram_layer_name == "QHY-Preview":
             self.img_buffer.put(imgdata_np)
-            self.histogram_widget.update_histogram()
+            # self.histogram_widget.update_histogram()
             self.last_histogram_update_time = current_time
             if self.contrast_limits_name != 'QHY-Preview':
                 self.contrast_limits_name = 'QHY-Preview'
@@ -2976,7 +2976,7 @@ class CameraControlWidget(QWidget):
             self.bind_contrast_limits_event()
             contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
             self.img_buffer.put(imgdata_np)
-            self.histogram_widget.update_histogram()
+            # self.histogram_widget.update_histogram()
             self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
             
     def on_time_index_change(self,event):
@@ -2985,7 +2985,7 @@ class CameraControlWidget(QWidget):
         if np.array_equal(imgdata_np[:,:,0], imgdata_np[:,:,1]) and np.array_equal(imgdata_np[:,:,1], imgdata_np[:,:,2]):
             imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_BGR2GRAY)
         self.img_buffer.put(imgdata_np)
-        self.histogram_widget.update_histogram()
+        # self.histogram_widget.update_histogram()
         
         
         
