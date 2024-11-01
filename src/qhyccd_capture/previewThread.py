@@ -5,11 +5,15 @@ from ctypes import *
 import time
 from multiprocessing import Array
 from threading import Lock
+import warnings
+from .language import translations
 
 class PreviewThread(QThread):
     frame_captured = pyqtSignal(float)  # 定义一个信号
+    request_stop = pyqtSignal()  # 添加一个信号用于请求停止线程
+    request_start = pyqtSignal()  # 添加一个信号用于请求启动线程
 
-    def __init__(self, camhandle, qhyccddll, image_w, image_h, camera_bit, is_color_camera, Debayer_mode, viewer,shared_image_data):
+    def __init__(self, camhandle, qhyccddll, image_w, image_h, camera_bit, is_color_camera, Debayer_mode, viewer, shared_image_data, language):
         super().__init__()
         self.camhandle = camhandle
         self.qhyccddll = qhyccddll
@@ -20,23 +24,48 @@ class PreviewThread(QThread):
         self.Debayer_mode = Debayer_mode
         self.image_c = 3 if Debayer_mode else 1
         self.viewer = viewer
-        self.running = True
+        self.running = False
         self.frame_times = []
         self.shared_image_data = shared_image_data
-        self.lock = Lock()  # 初始化锁
+        self.lock = Lock()
+        self.language = language
+        self.paused = False  # 新增一个属性来控制是否暂停
+
+        self.request_stop.connect(self.handle_stop)
+        self.request_start.connect(self.handle_start)  # 连接启动信号到槽
 
     def run(self):
         while self.running:
-            tip = self.capture_frame()
-            if tip :
-                self.frame_times.append(time.time())
-                if len(self.frame_times) > 300:
-                    self.frame_times.pop(0)
-                if len(self.frame_times) > 1:
-                    fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0]+0.0001)
-                else:
-                    fps = 0.0
-                self.frame_captured.emit(fps)
+            if not self.paused:  # 只有在不暂停的情况下才捕获帧
+                tip = self.capture_frame()
+                if tip:
+                    self.frame_times.append(time.time())
+                    if len(self.frame_times) > 300:
+                        self.frame_times.pop(0)
+                    if len(self.frame_times) > 1:
+                        fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0] + 0.0001)
+                    else:
+                        fps = 0.0
+                    self.frame_captured.emit(fps)
+            else:
+                time.sleep(0.1)
+                
+    def pause(self,pause):
+        if pause:
+            ret = self.qhyccddll.StopQHYCCDLive(self.camhandle)
+            if ret != 0:
+                warnings.warn(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+                return
+            self.update_fps()
+            self.paused = pause
+        else:
+            ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle)
+            if ret != 0:
+                warnings.warn(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+                self.append_text(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+                return
+            self.paused = pause
 
     def update_fps(self):
         self.frame_times.clear()
@@ -78,8 +107,42 @@ class PreviewThread(QThread):
                     np.copyto(np.ctypeslib.as_array(cast(addressof(self.shared_image_data), POINTER(c_ubyte)), shape=(img_size,)), img.flatten())
                 return 1
         
+    def handle_start(self):
+        """处理启动请求的槽函数"""
+        ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle)
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['begin_qhyccd_live_failed']}: {ret}")
+        else:
+            self.running = True
+            self.start()
 
-    def stop(self):
+    def start_thread(self):
+        """外部调用启动线程的方法"""
+        self.request_start.emit()  # 发射信号，请求启动线程
+
+
+    def handle_stop(self):
+        """处理停止请求的槽函数"""
+        ret = self.qhyccddll.StopQHYCCDLive(self.camhandle)
+        if ret != 0:
+            warnings.warn(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+            self.append_text(f"{translations[self.language]['debug']['stop_qhyccd_live_failed']}: {ret}")
+            return
         self.running = False
         self.update_fps()
         self.quit()
+
+    def stop(self):
+        """外部调用停止线程的方法"""
+        self.request_stop.emit()  # 发射信号，请求停止线程
+
+    def update_image_parameters(self, image_w, image_h, camera_bit, Debayer_mode,shared_image_data):
+        """更新图像参数的方法"""
+        with self.lock:  # 使用锁来确保线程安全
+            self.image_w = image_w
+            self.image_h = image_h
+            self.camera_bit = camera_bit
+            self.Debayer_mode = Debayer_mode
+            self.image_c = 3 if Debayer_mode else 1  # 更新通道数
+            self.shared_image_data = shared_image_data

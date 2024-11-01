@@ -22,6 +22,7 @@ src/qhyccd_capture/memory_updated.py
 src/qhyccd_capture/napari.yaml
 src/qhyccd_capture/previewThread.py
 src/qhyccd_capture/qhyccd_capture.py
+src/qhyccd_capture/qhyccd_sdk.py
 src/qhyccd_capture/read_raw_image.py
 src/qhyccd_capture/save_video.py
 src/qhyccd_capture/setting.py

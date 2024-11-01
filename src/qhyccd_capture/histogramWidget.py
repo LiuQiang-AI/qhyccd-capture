@@ -50,6 +50,12 @@ class HistogramWidget(QWidget):
     def update_histogram(self):
         if self.img_buffer.qsize() > 0:  # 假设img_buffer有一个is_empty()方法来检查缓冲区是否为空
             try:
+                # 获取当前缓冲区的大小
+                buffer_size = self.img_buffer.qsize()
+                if buffer_size > 1:
+                    # 忽略除最后一个之外的所有图像
+                    for _ in range(buffer_size - 1):
+                        self.img_buffer.get()  # 获取并丢弃图像
                 imgdata_np = self.img_buffer.get()
                 if imgdata_np is None:
                     return
