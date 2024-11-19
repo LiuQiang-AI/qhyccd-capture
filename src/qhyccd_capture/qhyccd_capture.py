@@ -1,12 +1,9 @@
-from email.mime import image
-from re import T
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QIcon, QTextCursor
 from napari_plugin_engine import napari_hook_implementation
 import napari
 import numpy as np
-import ctypes
 from ctypes import *
 import os
 import warnings
@@ -18,19 +15,13 @@ import queue
 import json
 import pickle
 import csv
-from multiprocessing import Array
 from threading import Lock
 from astropy.stats import sigma_clipped_stats
-from astropy.io import fits
 import multiprocessing
-from multiprocessing import Process, shared_memory, Event
-from PyQt5.QtWidgets import QApplication
-from sympy import N
+from multiprocessing import shared_memory
+
 
 # Import custom modules
-from .control_id import CONTROL_ID
-from .previewThread import PreviewThread
-from .captureFrame import CaptureThread
 from .save_video import SaveThread
 from .histogramWidget import HistogramWidget
 from .memory_updated import MemoryMonitorThread
@@ -39,7 +30,6 @@ from .language import translations
 from .fits_header import FitsHeaderEditor
 from .auto_exposure import AutoExposureDialog
 from .auto_white_balance import AutoWhiteBalanceDialog
-from .stellarSolver import StellarSolver
 from .astrometry import AstrometrySolver, AstrometryDialog
 from .planned_shooting import PlannedShootingDialog
 from .qhyccd_sdk import QHYCCDSDK
