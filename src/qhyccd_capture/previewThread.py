@@ -8,7 +8,6 @@ from multiprocessing import Array
 from threading import Lock
 import warnings
 
-from sympy import N
 from .language import translations
 
 class PreviewThread(threading.Thread):  
