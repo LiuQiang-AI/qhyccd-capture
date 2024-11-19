@@ -59,7 +59,7 @@ class HistogramWidget(QWidget):
                 imgdata_np = self.img_buffer.get()
                 if imgdata_np is None:
                     return
-                print(f"进行一次直方图更新: {imgdata_np.shape}")
+                # print(f"进行一次直方图更新: {imgdata_np.shape}")
                 self.clear_histogram_plots()
                 
                 bins_range = (0, 65535) if imgdata_np.dtype == np.uint16 else (0, 255)
@@ -80,12 +80,17 @@ class HistogramWidget(QWidget):
             if isinstance(item, pg.PlotDataItem):
                 self.plotWidget.removeItem(item)
 
-    def plot_single_channel_histogram(self, data, bins_number, bins_range, color):
+    def plot_single_channel_histogram(self, data, bins_number, bins_range, color, threshold=1):
         hist = cv2.calcHist([data], [0], None, [bins_number], bins_range)
         hist = hist.flatten()
+        # 应用阈值过滤直方图数据
+        hist[hist < threshold] = 0
+
         bin_edges = np.linspace(bins_range[0], bins_range[1], bins_number + 1)
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        self.plotWidget.plot(bin_centers, hist, pen=pg.mkPen(color, width=2))
+        # 只绘制非零的直方图数据
+        mask = hist > 0
+        self.plotWidget.plot(bin_centers[mask], hist[mask], pen=pg.mkPen(color, width=2))
 
     def update_min_max_lines(self, min_value, max_value):
         if self.min_line:

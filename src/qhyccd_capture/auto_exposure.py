@@ -7,14 +7,12 @@ from .control_id import CONTROL_ID
 
 class AutoExposureDialog(QDialog):
     mode_changed = pyqtSignal(int)
-    exposure_value_signal = pyqtSignal(float)  # 新增信号，用于发送曝光值
 
-    def __init__(self,qhyccddll,camera,language, parent=None):
+    def __init__(self,camera,language,sdk_input_queue, parent=None):
         super().__init__(parent)
-        self.parent = parent
         self.language = language
-        self.qhyccddll = qhyccddll
         self.camera = camera
+        self.sdk_input_queue = sdk_input_queue
         self.setWindowTitle(translations[self.language]["auto_exposure"]["auto_exposure"])
         self.setGeometry(100, 100, 400, 300)
 
@@ -60,7 +58,7 @@ class AutoExposureDialog(QDialog):
         
         for mode, (value, tooltip) in mask_mode_dict.items():
             self.mask_mode_combo.addItem(mode, value)  # 修改此行，添加value作为item的userData
-            self.mask_mode_combo.setItemData(self.mask_mode_combo.count() - 1, tooltip, Qt.ToolTipRole)
+            self.mask_mode_combo.setItemData(self.mask_mode_combo.count() - 1, tooltip, Qt.ToolTipRole)  # type: ignore
 
         # 将遮罩模式选择框加入窗口布局
         form_layout.addRow(self.mask_mode_combo)
@@ -97,88 +95,34 @@ class AutoExposureDialog(QDialog):
         self.timer.timeout.connect(self.send_exposure_value)  # 连接信号
 
     def update_limits(self):
-        # 获取曝光模式的参数限制
-        min, max, step = self.parent.getParamlimit(CONTROL_ID.CONTROL_AUTOEXPOSURE.value)
-        print(f"CONTROL_AUTOEXPOSURE min: {min}, max: {max}, step: {step}")
-        # 遍历现有的曝光模式，检查它们是否在允许的范围内
-        for mode_text, mode_value in list(self.exposure_mode_dict.items()):
-            if not (min <= mode_value <= max):
-                # 如果模式值不在范围内，从字典和下拉框中移除该模式
-                self.exposure_mode_combo.removeItem(self.exposure_mode_combo.findText(mode_text))
+        self.sdk_input_queue.put({"order":"get_auto_exposure_limits","data":""})
 
-        min, max, step = self.parent.getParamlimit(CONTROL_ID.CONTROL_AUTOEXPgainMax.value)
-        print(f"CONTROL_AUTOEXPgainMax min: {min}, max: {max}, step: {step}")
+    def update_limits_success(self,data ):
+        self.exposure_mode_combo.clear()
+        for mode_text, mode_value in list(data['mode'].items()):
+            self.exposure_mode_combo.addItem(mode_text, mode_value)
+        min, max, step = data['gain'][0:-1]
         self.gain_Max.setRange(min, max)
         self.gain_Max.setSingleStep(step)
-        gain_data = self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPgainMax.value)
+        gain_data = data['gain'][-1]
         self.gain_Max.setValue(gain_data)
-        min, max, step = self.parent.getParamlimit(CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value)
-        print(f"CONTROL_AUTOEXPexpMaxMS min: {min}, max: {max}, step: {step}")
+        min, max, step = data['exposure'][0:-1]
         self.exposure_time.setRange(min, max)
         self.exposure_time.setSingleStep(step)
-        exposure_data = self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value)
+        exposure_data = data['exposure'][-1]
         self.exposure_time.setValue(exposure_data)
     
     def apply_changes(self):
-        mode = self.exposure_mode_combo.currentIndex()
+        self.sdk_input_queue.put({"order":"set_auto_exposure","data":(self.exposure_mode_combo.currentIndex(),self.gain_Max.value(),self.exposure_time.value())})
+        
+    def apply_changes_success(self,mode):
         if mode == 0:
-            if self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 0:
-                ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 0.0)
-                if ret != 0:
-                    self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_auto_exposure_mode_error']}")  
-                    QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_auto_exposure_mode_error'])
-                    return
             self.timer.stop()
-        elif mode == 1:
-            if self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 1:
-                ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 1.0)
-                if ret != 0:
-                    self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_auto_exposure_mode_error']}")
-                    QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_auto_exposure_mode_error'])
-                    return
-            gain_max = int(self.gain_Max.value())
-            ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max)
-            if ret != 0:
-                self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_gain_max_error']}")
-                QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_gain_max_error'])
-                return
-            self.timer.start(500)  # 设置计时器每1000毫秒（1秒）触发一次
-        elif mode == 2:
-            if self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 2:
-                ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 2.0)
-                if ret != 0:
-                    self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_auto_exposure_mode_error']}")
-                    QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_auto_exposure_mode_error'])
-                    return
-            exposure_time = int(self.exposure_time.value())
-            ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time)
-            if ret != 0:
-                self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_exposure_time_error']}")
-                QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_exposure_time_error'])
-                return
-            self.timer.start(500)  # 设置计时器每1000毫秒（1秒）触发一次
-        elif mode == 3:
-            if self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 3:
-                ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 3.0)
-                if ret != 0:
-                    self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_auto_exposure_mode_error']}")
-                    QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_auto_exposure_mode_error'])
-                    return
-            gain_max = int(self.gain_Max.value())
-            ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max)
-            if ret != 0:
-                self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_gain_max_error']}")
-                QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_gain_max_error'])
-                return
-            exposure_time = int(self.exposure_time.value())
-            ret = self.qhyccddll.SetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time)
-            if ret != 0:
-                self.parent.append_text(f"{translations[self.language]['auto_exposure']['error']}:{translations[self.language]['auto_exposure']['set_exposure_time_error']}")
-                QMessageBox.critical(self, translations[self.language]['auto_exposure']['error'], translations[self.language]['auto_exposure']['set_exposure_time_error'])
-                return
-            self.timer.start(500)  # 设置计时器每1000毫秒（1秒）触发一次
+        elif mode == 1 or mode == 2 or mode == 3:
+            self.timer.start(500)  
         elif mode == 4:
             pass
+        
         self.mode_changed.emit(mode)
         self.parent.append_text(f"{translations[self.language]['auto_exposure']['apply_success']}:{self.exposure_mode_combo.currentText()}")
         
@@ -223,6 +167,4 @@ class AutoExposureDialog(QDialog):
             self.gain_Max.setEnabled(True)
 
     def send_exposure_value(self):
-        # 获取当前曝光值
-        exposure_value = self.qhyccddll.GetQHYCCDParam(self.camera, CONTROL_ID.CONTROL_EXPOSURE.value)
-        self.exposure_value_signal.emit(exposure_value)  # 发送信号
+        self.sdk_input_queue.put({"order":"get_exposure_value","data":""})

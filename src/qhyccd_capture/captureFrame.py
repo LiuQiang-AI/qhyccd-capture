@@ -1,22 +1,21 @@
-from PyQt5.QtCore import QThread, pyqtSignal
 import numpy as np
 import ctypes
 from ctypes import byref
 import warnings
 from .language import translations
-class CaptureThread(QThread):
-    capture_finished = pyqtSignal(np.ndarray)
+import threading
+class CaptureThread(threading.Thread):
 
-    def __init__(self, camhandle, qhyccddll, image_w, image_h, camera_bit, is_color_camera, bayer_conversion,language):
+    def __init__(self, camhandle, qhyccddll, image_w, image_h,image_c, camera_bit,sdk_output_queue,language='cn'):
         super().__init__()
         self.language = language
         self.camhandle = camhandle
         self.qhyccddll = qhyccddll
         self.image_w = image_w
         self.image_h = image_h
+        self.image_c = image_c
         self.camera_bit = camera_bit
-        self.is_color_camera = is_color_camera
-        self.bayer_conversion = bayer_conversion
+        self.sdk_output_queue = sdk_output_queue
 
     def run(self):
         # 启动单帧模式曝光
@@ -44,11 +43,6 @@ class CaptureThread(QThread):
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_single_frame_failed']}: {ret}")
             return  # 如果获取失败，直接返回避免进一步阻塞
 
-        # print("GetQHYCCDSingleFrame() ret =", ret, "w =", w.value, "h =", h.value, "b =", b.value, "c =", c.value,
-        #     "data size =", int(w.value * h.value * b.value * c.value / 8))
-        # print("data =", imgdata)
-
-
         imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte * length)).contents
 
         if c.value == 1:
@@ -64,4 +58,8 @@ class CaptureThread(QThread):
         else:
             raise ValueError("Unsupported number of channels")
 
-        self.capture_finished.emit(imgdata_np)
+        self.sdk_output_queue.put({"order":"singleCapture_success",'data':imgdata_np})
+    
+    def stop(self):
+        self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle)
+        exit()

@@ -108,7 +108,7 @@ class SaveThread(QThread):
         """保存图像的方法"""
         try:
             if imgdata_np.ndim == 3:  # 检查是否为三通道彩色图像
-                imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_RGB2BGR)  # 将RGB转换为BGR
+                imgdata_np = cv2.cvtColor(imgdata_np, cv2.COLOR_RGB2GRAY)  # 将RGB转换为灰度
             if file_format.lower() == 'fits':
                 # 创建FITS HDU对象
                 hdu = fits.PrimaryHDU(imgdata_np)

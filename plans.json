@@ -1,0 +1,183 @@
+{
+    "1": [
+        {
+            "name": "QHY163M-c6383f42abf9b9d36",
+            "readout_mode": "STANDARD MODE",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 10,
+            "offset": 0,
+            "depth": "8bit",
+            "CFW": "滤镜轮4"
+        },
+        {
+            "name": "QHY5III568C-5a14ed5417d3246bd",
+            "readout_mode": "2X2 FD Binning",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 30,
+            "offset": 30,
+            "depth": "16bit",
+            "CFW": "None"
+        },
+        {
+            "name": "QHY5III568C-5a14ed5417d3246bd",
+            "readout_mode": "Full Resolution",
+            "interval": "00:00:00",
+            "exposure": 19993.0,
+            "gain": 29,
+            "offset": 30,
+            "depth": "16bit",
+            "CFW": "None"
+        },
+        {
+            "name": "QHY5III568C-5a14ed5417d3246bd",
+            "readout_mode": "2X2 FD Binning",
+            "interval": "00:00:00",
+            "exposure": 19999.0,
+            "gain": 30,
+            "offset": 30,
+            "depth": "16bit",
+            "CFW": "None"
+        },
+        {
+            "name": "QHY5III568C-5a14ed5417d3246bd",
+            "readout_mode": "Full Resolution",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 30,
+            "offset": 30,
+            "depth": "8bit",
+            "CFW": "None"
+        },
+        {
+            "name": "QHY163M-c6383f42abf9b9d36",
+            "readout_mode": "STANDARD MODE",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 10,
+            "offset": 0,
+            "depth": "16bit",
+            "CFW": "滤镜轮0"
+        },
+        {
+            "name": "QHY163M-c6383f42abf9b9d36",
+            "readout_mode": "STANDARD MODE",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 10,
+            "offset": 0,
+            "depth": "16bit",
+            "CFW": "滤镜轮5"
+        },
+        {
+            "name": "QHY163M-c6383f42abf9b9d36",
+            "readout_mode": "STANDARD MODE",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 10,
+            "offset": 0,
+            "depth": "8bit",
+            "CFW": "滤镜轮1"
+        },
+        {
+            "name": "QHY163M-c6383f42abf9b9d36",
+            "readout_mode": "STANDARD MODE",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 10,
+            "offset": 0,
+            "depth": "8bit",
+            "CFW": "滤镜轮5"
+        },
+        {
+            "name": "QHY5III568C-5a14ed5417d3246bd",
+            "readout_mode": "Full Resolution",
+            "interval": "00:00:00",
+            "exposure": 20000.0,
+            "gain": 30,
+            "offset": 30,
+            "depth": "8bit",
+            "CFW": "None"
+        },
+        {
+            "QHY163M-c6383f42abf9b9d36": {
+                "ids": "",
+                "readout_mode": {
+                    "STANDARD MODE": 0
+                },
+                "exposure": [
+                    1,
+                    3600000000,
+                    1,
+                    20000
+                ],
+                "gain": [
+                    0,
+                    580,
+                    1,
+                    10
+                ],
+                "offset": [
+                    0,
+                    511,
+                    1,
+                    0
+                ],
+                "depth": {
+                    "8bit": 8,
+                    "16bit": 16
+                },
+                "CFW": [
+                    true,
+                    {
+                        "滤镜轮0": "0",
+                        "滤镜轮1": "1",
+                        "滤镜轮2": "2",
+                        "滤镜轮3": "3",
+                        "滤镜轮4": "4",
+                        "滤镜轮5": "5",
+                        "滤镜轮6": "6"
+                    }
+                ],
+                "connection": true,
+                "state": 93897504304688
+            },
+            "QHY5III568C-5a14ed5417d3246bd": {
+                "ids": "",
+                "readout_mode": {
+                    "Full Resolution": 0,
+                    "2X2 FD Binning": 1
+                },
+                "exposure": [
+                    1,
+                    300000000,
+                    1,
+                    20000
+                ],
+                "gain": [
+                    0,
+                    480,
+                    1,
+                    30
+                ],
+                "offset": [
+                    0,
+                    255,
+                    1,
+                    30
+                ],
+                "depth": {
+                    "8bit": 8,
+                    "16bit": 16
+                },
+                "CFW": [
+                    false,
+                    {}
+                ],
+                "connection": true,
+                "state": 0
+            }
+        }
+    ]
+}
