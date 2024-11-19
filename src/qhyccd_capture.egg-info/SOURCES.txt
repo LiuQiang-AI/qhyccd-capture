@@ -5,7 +5,9 @@ README_CN.md
 luts.pkl
 pyproject.toml
 requirements.txt
+settings.json
 tox.ini
+.vscode/settings.json
 src/qhyccd_capture/__init__.py
 src/qhyccd_capture/accept_sdk_data.py
 src/qhyccd_capture/astrometry.py

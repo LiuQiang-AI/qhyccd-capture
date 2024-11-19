@@ -20,7 +20,6 @@ class MemoryMonitorThread(QThread):
             except Exception as e:
                 self.stop()
             self.sleep(1)  # 每秒更新一次
-        print("memory_updated进程结束")
     def stop(self):
         self.is_running = False
         self.terminate()

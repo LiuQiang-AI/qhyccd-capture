@@ -47,7 +47,6 @@ class CameraControlWidget(QWidget):
         self.init_sdk()
         
         self.viewer.layers.selection.events.changed.connect(self.on_selection_changed)
-        # print(f"self.viewer.window: {dir(self.viewer.events.window.event_class)}")
         self.append_text(translations[self.language]['qhyccd_capture']['init_complete'])
 
         '''初始化相机资源'''
@@ -57,17 +56,13 @@ class CameraControlWidget(QWidget):
             else:
                 self.init_qhyccdResource(self.settings_dialog.qhyccd_path_label.text())
         except Exception as e:
-            print(f"{translations[self.language]['debug']['init_failed']}: {str(e)}")
-            self.append_text(translations[self.language]['qhyccd_capture']['init_failed'])
+            self.append_text(f"{translations[self.language]['debug']['init_failed']}: {str(e)}",True)
 
     def cleanup(self):
-        # 执行清理操作
-        print("窗口关闭")
         self.disconnect_camera()
         self.release_qhyccd_resource()
  
     def closeEvent(self, event):
-        print("关闭窗口")
         self.disconnect_camera()
         self.release_qhyccd_resource()
         super().closeEvent(event)
@@ -82,28 +77,19 @@ class CameraControlWidget(QWidget):
         self.sdk_output_queue.close()
         self.accept_sdk_data.stop()
         # 等待子进程释放共享内存
-        while not self.release_event.is_set():
-            print("等待子进程释放共享内存...")
-            time.sleep(0.1)  # 非阻塞等待，避免占用 CPU
         if self.shm1 is not None:
             try:
                 self.shm1.close()
                 self.shm1.unlink()
-                print(f"Shared memory {self.shm1.name} unlinked.")
-            except FileNotFoundError:
-                print(f"Shared memory {self.shm1.name} not found for unlinking.")
             except Exception as e:
-                print(f"Error unlinking shared memory {self.shm1.name}: {e}")
+                self.append_text(f"Error unlinking shared memory {self.shm1.name}: {e}",True)
         if self.shm2 is not None:
             try:
                 self.shm2.close()
                 self.shm2.unlink()
-                print(f"Shared memory {self.shm2.name} unlinked.")
-            except FileNotFoundError:
-                print(f"Shared memory {self.shm2.name} not found for unlinking.")
             except Exception as e:
-                print(f"Error unlinking shared memory {self.shm2.name}: {e}")
-        print("----------------------------------------------结束qhyccd_capture----------------------------------------------")
+                self.append_text(f"Error unlinking shared memory {self.shm2.name}: {e}",True)
+
         
     def init_parameters(self):
         self.system_name = os.name
@@ -194,7 +180,7 @@ class CameraControlWidget(QWidget):
             self.astrometrySolver.error.connect(self.on_astrometry_error)
             self.astrometrySolver.star_info.connect(self.on_astrometry_star_info)
         except Exception as e:
-            print(f"Failed to initialize AstrometrySolver: {str(e)}")
+            self.append_text(f"Failed to initialize AstrometrySolver: {str(e)}",True)
 
     def init_ui(self):
         # 创建一个主布局
@@ -702,9 +688,9 @@ class CameraControlWidget(QWidget):
         # 添加白平衡控制
         self.wb_group = QGroupBox(translations[self.language]['qhyccd_capture']['white_balance_control'])
         wb_layout = QFormLayout()
-        self.wb_red = QSlider(Qt.Horizontal)
-        self.wb_green = QSlider(Qt.Horizontal)
-        self.wb_blue = QSlider(Qt.Horizontal)
+        self.wb_red = QSlider(Qt.Orientation.Horizontal)
+        self.wb_green = QSlider(Qt.Orientation.Horizontal)
+        self.wb_blue = QSlider(Qt.Orientation.Horizontal)
         
         wb_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['red']), self.wb_red)
         wb_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['green']), self.wb_green)
@@ -814,6 +800,7 @@ class CameraControlWidget(QWidget):
     def init_ui_state(self):
         '''初始化UI状态'''
         # 创建一个垂直方向的 spacer
+        # 创建一个垂直方向的 spacer
         spacer = QSpacerItem(20, 2, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
         # 将 spacer 添加到布局的底部
@@ -821,7 +808,7 @@ class CameraControlWidget(QWidget):
 
         '''主布局'''
         self.setLayout(QVBoxLayout())
-        self.layout().addWidget(self.scroll_area)
+        self.layout().addWidget(self.scroll_area)   # type: ignore
         
         '''初始化所有区域为隐藏状态'''
         self.settings_box.setVisible(False)
@@ -881,7 +868,6 @@ class CameraControlWidget(QWidget):
             self.append_text(f"{translations[self.language]['debug']['load_settings_failed']}: {e}")
             
     def update_memory_progress(self, used_memory):
-        # print(f"Used Memory: {used_memory},")
         if used_memory > 0:
             memory_usage_percentage = int(used_memory)
             self.memory_progress_bar.setValue(memory_usage_percentage)  # 更新进度条值
@@ -991,8 +977,6 @@ class CameraControlWidget(QWidget):
     def update_image_buffer_size_success(self,image_buffer_size):
         self.shm1 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
         self.shm2 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
-        print(f"Shared memory {self.shm1.name} created.")
-        print(f"Shared memory {self.shm2.name} created.")
         self.sdk_input_queue.put({'order':'set_image_buffer', 'data':{'shm1':self.shm1.name,'shm2':self.shm2.name}})
         self.reset_camera_button.setEnabled(True)
         
@@ -1337,8 +1321,10 @@ class CameraControlWidget(QWidget):
         self.sdk_input_queue.put({'order':'get_camera_config', 'data':''})
 
     def update_camera_config_success(self,camera_config_dict):
-        chipW = camera_config_dict["chipW"]
-        chipH = camera_config_dict["chipH"]
+        if self.camera_name is None:
+            self.camera_name = self.camera_selector.currentText()
+        chipW = round(camera_config_dict["chipW"], 5)
+        chipH = round(camera_config_dict["chipH"], 5)
         imageW = camera_config_dict["imageW"]
         imageH = camera_config_dict["imageH"]
         pixelW = camera_config_dict["pixelW"]
@@ -1597,7 +1583,6 @@ class CameraControlWidget(QWidget):
             visible = not self.settings_box.isVisible()
         else:
             visible = state
-        # print(f"toggle_settings_box:{visible} , state:{state}")
         self.settings_box.setVisible(visible)
         self.show_settings_checkbox.setStyleSheet("background-color: green;" if visible else "")  # 设置按钮颜色
 
@@ -1667,10 +1652,10 @@ class CameraControlWidget(QWidget):
     @pyqtSlot(int)
     def on_pixel_bin_changed(self, index):
         if not self.camera_state:
-            return -1
+            return 
         bin_size = self.pixel_bin_selector.itemText(index)
         if bin_size == ' ' or bin_size is None or bin_size == '':
-            return -1
+            return 
         self.pixel_bin_selector.setEnabled(False)
         self.bin = self.camera_pixel_bin[bin_size]
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_state:
@@ -1681,7 +1666,6 @@ class CameraControlWidget(QWidget):
         self.image_y = 0
         self.image_w = int(self.camera_W/self.camera_pixel_bin[bin_size][0])
         self.image_h = int(self.camera_H/self.camera_pixel_bin[bin_size][1])
-        # print("SetQHYCCDBinMode() ret =", ret)
         self.update_resolution(self.image_x,self.image_y,self.image_w,self.image_h)
     
     def on_set_pixel_bin_success(self):
@@ -1706,7 +1690,7 @@ class CameraControlWidget(QWidget):
         # 获取选中的输出格式
         depth = self.depth_selector.itemText(index)
         if depth == ' ' or depth is None or depth == '':
-            return -1
+            return 
         
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             if self.camera_depth_options[depth] == 16 and self.is_color_camera:
@@ -1734,12 +1718,11 @@ class CameraControlWidget(QWidget):
     @pyqtSlot(int)
     def on_Debayer_mode_changed(self, index):
         if not self.camera_state:
-            return -1
+            return 
         # 获取选中的Debayer模式
         mode = self.Debayer_mode_selector.itemText(index)
         if mode == ' ' or mode is None :
-            return -1
-        # print(f'选中的Debayer模式: {mode}')
+            return 
         self.Debayer_mode = self.camera_Debayer_mode[mode]
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.sdk_input_queue.put({'order':'set_preview_pause', 'data':True})
@@ -1761,7 +1744,6 @@ class CameraControlWidget(QWidget):
         if self.capture_in_progress :
             self.cancel_capture()
             return
-        print(f"start_capture")
         self.capture_in_progress = True
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
             self.on_capture_finished(self.preview_image)
@@ -1805,7 +1787,6 @@ class CameraControlWidget(QWidget):
         display_mode = self.display_mode_selector.currentText()
         
         if display_mode == translations[self.language]["qhyccd_capture"]["distributed_display"]:
-            # print(f"分布式显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             self.current_image = imgdata_np
             self.current_image_name = f'{camera_name}-{current_time}'
             self.viewer.add_image(self.current_image, name=self.current_image_name)
@@ -1814,12 +1795,10 @@ class CameraControlWidget(QWidget):
             else:
                 self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"]:
-                # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
         elif display_mode == translations[self.language]["qhyccd_capture"]["single_display"]:
             self.current_image_name = f'{camera_name}-one'
-            # print(f"单一显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             if self.current_image is not None and self.current_image_name in self.viewer.layers and self.current_image.ndim == imgdata_np.ndim and self.current_image.shape == imgdata_np.shape:
                 self.current_image = imgdata_np
 
@@ -1836,8 +1815,6 @@ class CameraControlWidget(QWidget):
                 self.viewer.layers[self.current_image_name].data = imgdata_np
             
         elif display_mode == translations[self.language]["qhyccd_capture"]["sequential_display"]:
-            # 打印图像的形状和维度
-            # print(f"序列显示 图像形状: {imgdata_np.shape}, 维度: {imgdata_np.ndim}")
             if imgdata_np.ndim == 2:
                 imgdata_np_3c = np.stack([imgdata_np] * 3, axis=-1)
                 imgdata_np_3c = imgdata_np_3c[np.newaxis, ...]
@@ -1862,7 +1839,6 @@ class CameraControlWidget(QWidget):
                     self.viewer.layers[self.current_image_name].contrast_limits = (0, 255)
             
             if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and self.is_color_camera:
-                # print("单帧模式")
                 imgdata_np = self.apply_white_balance_software(imgdata_np=self.current_image.copy())
                 self.viewer.layers[self.current_image_name].data = imgdata_np
 
@@ -1872,6 +1848,8 @@ class CameraControlWidget(QWidget):
             
         # 检查图层是否存在于图层列表中
         if self.current_image_name in self.viewer.layers:
+            if self.current_image is None:
+                self.current_image = self.viewer.layers[self.current_image_name].data
             # 获取当前图层
             layer = self.viewer.layers[self.current_image_name]
             # 获取当前图层的索引
@@ -1911,7 +1889,6 @@ class CameraControlWidget(QWidget):
         self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_canceled"])
         self.append_text(translations[self.language]["qhyccd_capture"]["cancel_capture"])
         self.sdk_input_queue.put({"order":"cancel_capture",'data':''})
-        # print("拍摄已取消")
 
     def save_image(self):
         if self.current_image is not None:
@@ -1925,10 +1902,8 @@ class CameraControlWidget(QWidget):
                     cv2.imwrite(file_path, self.current_image)
                 elif self.current_image.ndim == 3 and self.current_image.shape[2] == 3:
                     cv2.imwrite(file_path, cv2.cvtColor(self.current_image, cv2.COLOR_RGB2BGR))
-                # print(f"图像已保存到: {file_path}")
                 self.append_text(f"{translations[self.language]['qhyccd_capture']['save_image_success']}:{file_path}")
         else:
-            # print("没有图像可保存")
             self.append_text(translations[self.language]["qhyccd_capture"]["save_image_failed"])
     
     def update_exposure_time(self):
@@ -1992,11 +1967,9 @@ class CameraControlWidget(QWidget):
 
     def on_mouse_double_click(self, viewer, event):
         self.clear_roi()
-        # print("所有ROI矩形框已删除")
         
     def on_save_mode_changed(self, index):
         self.save_mode = self.save_mode_selector.itemText(index)
-        # print(f"选中的录像模式: {self.save_mode}")
         if self.save_mode == translations[self.language]["qhyccd_capture"]["single_frame_storage"]:
             self.save_format_selector.clear()
             self.save_format_selector.addItems(['png', 'jpeg', 'tiff', 'fits'])  # 图片格式
@@ -2111,6 +2084,8 @@ class CameraControlWidget(QWidget):
         green_gain = 1+self.wb_green.value() / self.wb_green.maximum()  # 获取绿色增益
         blue_gain = 1+self.wb_blue.value() / self.wb_blue.maximum()  # 获取蓝色增益
         imgdata_np = self.apply_white_balance_software(self.current_image.copy(),red_gain,green_gain,blue_gain)
+        if imgdata_np is None:
+            return
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["single_frame_mode"] and len(self.viewer.layers) > 0 and self.viewer.layers[-1].name.startswith('QHY') and imgdata_np.ndim == self.viewer.layers[-1].data.ndim:
             self.viewer.layers[-1].data = imgdata_np
             self.img_buffer.put(imgdata_np)
@@ -2154,7 +2129,6 @@ class CameraControlWidget(QWidget):
         image[:, :, 0] = lut_red[image[:, :, 0]]
         image[:, :, 1] = lut_green[image[:, :, 1]]
         image[:, :, 2] = lut_blue[image[:, :, 2]]
-        # print(f"增益处理完成，用时: {time.time() - start_time} 秒")
         return image    
     
     # 生成全局查找表
@@ -2231,7 +2205,7 @@ class CameraControlWidget(QWidget):
     def on_CFW_filter_changed(self, index):
         self.CFW_id = self.CFW_filter_selector.itemText(index)
         if self.CFW_id == "None" or self.CFW_id == "" or self.CFW_id == " ":
-            return -1
+            return 
         self.sdk_input_queue.put({"order":"setCFWFilter","data":self.CFW_id})
     
     def swap_elements(self, dictionary, key):
@@ -2247,7 +2221,7 @@ class CameraControlWidget(QWidget):
         return dictionary
     
     def toggle_preview_mode(self, state):
-        if state == Qt.Checked:
+        if state == Qt.CheckState.Checked:
             self.preview_status = True
         else:
             self.preview_status = False
@@ -2353,13 +2327,14 @@ class CameraControlWidget(QWidget):
         try:
             if shm_status:
                 with self.lock:
-                    imgdata_np = self.shm1.buf[:image_size]  # 尝试从共享内存中获取数据
+                    if self.shm1 is not None:
+                        imgdata_np = self.shm1.buf[:image_size]  # 尝试从共享内存中获取数据
             else:
                 with self.lock:
-                    imgdata_np = self.shm2.buf[:image_size]  # 尝试从共享内存中获取数据
+                    if self.shm2 is not None:
+                        imgdata_np = self.shm2.buf[:image_size]  # 尝试从共享内存中获取数据
             imgdata_np = np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h) if image_c == 1 else np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h, image_c)
         except queue.Empty:
-            print("队列为空，没有可用的数据。")  # 处理队列为空的情况
             return  # 退出函数或执行其他逻辑
         if imgdata_np is None:
             return
@@ -2380,7 +2355,6 @@ class CameraControlWidget(QWidget):
     
             # 应用 Bayer 转换
             if self.is_color_camera and self.bayer_conversion != "None":
-                # print(f"经过convert_bayer() imgdata_np.shape: {imgdata_np.shape}")
                 imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
             if self.save_thread is None:
                 self.buffer_queue = queue.Queue()
@@ -2505,13 +2479,12 @@ class CameraControlWidget(QWidget):
         try:
             self.contrast_limits_connection = current_layer.events.contrast_limits.connect(self.on_contrast_limits_change)
         except Exception as e:
-            print(f"Error connecting contrast limits event: {e}")
+            self.append_text(f"Error connecting contrast limits event: {e}",True)
 
     def on_contrast_limits_change(self, event):
         if self.contrast_limits_name in self.viewer.layers:
             # 当对比度限制变化时触发的函数
             contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
-            # print(f"contrast_limit: {contrast_limits}")
             self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
 
     def toggle_auto_exposure(self):
@@ -2619,7 +2592,6 @@ class CameraControlWidget(QWidget):
             if dialog.exec_() == QDialog.Accepted:  # 检查对话框是否被接受
                 self.star_progress_bar.setRange(0, 0)
                 params = dialog.get_parameters()
-                # print(f"params: {params}")  # 打印或使用参数
                 self.astrometrySolver.start_solving(image_input=image, params=params)
                 self.star_analysis_button.setEnabled(False)
             else:
@@ -2640,7 +2612,6 @@ class CameraControlWidget(QWidget):
         return star_dict    
             
     def on_astrometry_finished(self, result):
-        print(f"Astrometry result: {result}")
         self.append_text(f"Astrometry result: {result}")
         self.star_analysis_button.setEnabled(True)
         self.star_progress_bar.setRange(0, 100)
@@ -2713,17 +2684,17 @@ class CameraControlWidget(QWidget):
         if self.star_table is None:
             self.append_text(translations[self.language]['qhyccd_capture']['no_detected_stars'])
             return
-
+        
         file_path, _ = QFileDialog.getSaveFileName(self, translations[self.language]['qhyccd_capture']['save_star_table'], "", "CSV Files (*.csv)")
         if file_path:
             with open(file_path, 'w', newline='') as file:
                 writer = csv.writer(file)
                 # 获取所有列的标题
-                headers = [self.star_table.horizontalHeaderItem(i).text() for i in range(self.star_table.columnCount())]
+                headers = [self.star_table.horizontalHeaderItem(i).text() for i in range(self.star_table.columnCount())]    # type: ignore
                 writer.writerow(headers)
                 # 写入每一行的数据
                 for row in range(self.star_table.rowCount()):
-                    row_data = [self.star_table.item(row, col).text() for col in range(self.star_table.columnCount())]
+                    row_data = [self.star_table.item(row, col).text() for col in range(self.star_table.columnCount())]    # type: ignore
                     writer.writerow(row_data)
             self.append_text(f"{translations[self.language]['qhyccd_capture']['star_table_saved']}: {file_path}")
         
@@ -2737,7 +2708,6 @@ class CameraControlWidget(QWidget):
             for layer in selected_layers:
                 if layer.name == 'QHY-Preview':
                     self.histogram_layer_name = layer.name
-        # print(f"self.histogram_layer_name: {self.histogram_layer_name}")
         if self.histogram_layer_name is not None and self.histogram_layer_name != 'QHY-Preview':
             imgdata_np = self.viewer.layers[self.histogram_layer_name].data
             
@@ -2776,11 +2746,9 @@ class CameraControlWidget(QWidget):
         self.planned_shooting_dialog.updateTableOptions(data)
 
     def on_plan_running(self,data):
-        print(f"计划执行中")
         self.sdk_thread.runPlan_signal.emit(data)
         
     def on_plan_success(self,image_data):
-        print(f"计划执行完成")
         self.planned_shooting_dialog.update_row_state()
         self.viewer.add_image(image_data, name='Plan Shooting')
         

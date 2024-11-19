@@ -891,7 +891,6 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_depth_success']}:{data['depth']}"})
         if data['CFW'] != 'None':
             order = ord(data['CFW'])
-            print(f"order: {order}")
             ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWPORT.value, order) # type: ignore
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_CFW_failed'],sys._getframe().f_lineno)
@@ -926,7 +925,6 @@ class QHYCCDSDK(multiprocessing.Process):
         else:
             imgdata = (ctypes.c_uint8 * length)()
             imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte))
-        print("datasize =", length)
 
         ret = self.qhyccddll.GetQHYCCDSingleFrame(camhandle, byref(w), byref(h), byref(b), byref(c), imgdata) # type: ignore
         if ret != 0:
