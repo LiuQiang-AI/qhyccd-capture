@@ -1,4 +1,3 @@
-LICENSE
 MANIFEST.in
 README.md
 README_CN.md
@@ -15,6 +14,7 @@ src/qhyccd_capture/auto_exposure.py
 src/qhyccd_capture/auto_white_balance.py
 src/qhyccd_capture/captureFrame.py
 src/qhyccd_capture/control_id.py
+src/qhyccd_capture/externalTriggerThread.py
 src/qhyccd_capture/fits_header.py
 src/qhyccd_capture/fits_header_defaults.py
 src/qhyccd_capture/histogramWidget.py
@@ -28,6 +28,7 @@ src/qhyccd_capture/qhyccd_sdk.py
 src/qhyccd_capture/read_raw_image.py
 src/qhyccd_capture/save_video.py
 src/qhyccd_capture/setting.py
+src/qhyccd_capture/sharedMemoryManager.py
 src/qhyccd_capture/stellarSolver.py
 src/qhyccd_capture.egg-info/PKG-INFO
 src/qhyccd_capture.egg-info/SOURCES.txt

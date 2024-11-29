@@ -69,11 +69,14 @@ class SettingsDialog(QDialog):
         self.cancel_button.clicked.connect(self.cancel_settings)  # 连接取消按钮到取消设置的方法
         self.reset_button = QPushButton(translations[self.language]["setting"]["reset"])
         self.reset_button.clicked.connect(self.reset_settings)  # 连接重置按钮到重置设置的方法
+        self.clear_cache_button = QPushButton(translations[self.language]["setting"]["clear_cache"])
+        self.clear_cache_button.clicked.connect(self.clear_cache)
         
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.apply_button)
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.reset_button)
+        button_layout.addWidget(self.clear_cache_button)
         
         layout.addLayout(button_layout)
         
@@ -122,5 +125,34 @@ class SettingsDialog(QDialog):
         self.language_combo.setCurrentText(language_key[self.language])
         self.qhyccd_path_label.setText(self.qhyccd_path)  # 更新路径标签
       
+    def clear_cache(self):
+        # 弹出确认对话框
+        reply = QMessageBox.question(self, translations[self.language]["setting"]["clear_cache"], translations[self.language]["setting"]["clear_cache_message"],
+                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            files_to_delete = ["luts.pkl", "camera_info.json", "plans.json", "settings.json"]
+            deleted_files = []
+            errors = []
+
+            for file_name in files_to_delete:
+                try:
+                    os.remove(file_name)
+                    deleted_files.append(file_name)  # 记录成功删除的文件
+                except FileNotFoundError:
+                    errors.append(f"{file_name} not found.")  # 记录文件未找到错误
+                except Exception as e:
+                    errors.append(f"Error deleting {file_name}: {str(e)}")  # 记录其他错误
+
+            # 准备消息内容
+            if deleted_files:
+                message = translations[self.language]["setting"]["cache_deleted"] + "\n" + "\n".join(deleted_files)
+                if errors:
+                    message += "\n\n" + translations[self.language]["setting"]["cache_not_found"] + "\n" + "\n".join(errors)
+            else:
+                message = translations[self.language]["setting"]["no_files_deleted"] + "\n" + "\n".join(errors)
+
+            # 显示消息框
+            QMessageBox.information(self, translations[self.language]["setting"]["clear_cache"], message)
 
 

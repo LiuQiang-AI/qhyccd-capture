@@ -6,7 +6,7 @@ from .language import translations
 import threading
 class CaptureThread(threading.Thread):
 
-    def __init__(self, camhandle, qhyccddll, image_w, image_h,image_c, camera_bit,sdk_output_queue,language='cn'):
+    def __init__(self, camhandle, qhyccddll,image_w, image_h,image_c, camera_bit,GPS_control,sdk_output_queue,language='cn'):
         super().__init__()
         self.language = language
         self.camhandle = camhandle
@@ -15,6 +15,7 @@ class CaptureThread(threading.Thread):
         self.image_h = image_h
         self.image_c = image_c
         self.camera_bit = camera_bit
+        self.GPS_control = GPS_control
         self.sdk_output_queue = sdk_output_queue
 
     def run(self):
@@ -30,35 +31,31 @@ class CaptureThread(threading.Thread):
         b = ctypes.c_uint32()
         c = ctypes.c_uint32()
         length = int(self.image_h * self.image_w * self.camera_bit / 8)
-        if self.camera_bit == 16:
-            imgdata = (ctypes.c_uint16 * length)()
-            imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte))
-        else:
-            imgdata = (ctypes.c_uint8 * length)()
-            imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte))
-        # print("datasize =", length)
+        if self.GPS_control:
+            length += 44
+        imgdata = (ctypes.c_ubyte * length)()
 
         ret = self.qhyccddll.GetQHYCCDSingleFrame(self.camhandle, byref(w), byref(h), byref(b), byref(c), imgdata)
         if ret != 0:
             warnings.warn(f"{translations[self.language]['debug']['get_qhyccd_single_frame_failed']}: {ret}")
             return  # 如果获取失败，直接返回避免进一步阻塞
 
-        imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte * length)).contents
+        # 将临时缓冲区转换为 numpy 数组
+        img = np.ctypeslib.as_array(imgdata, shape=(length,))
+        
+        gps_data = None
+        if self.GPS_control:
+            gps_data = img[:44]
+            img = img[44:]
+        
+        # 根据通道数处理图像
+        if c.value == 3:  # 彩色图像
+            img = img.reshape((h.value, w.value, c.value))
+            img = img[:, :, ::-1]  # 将 BGR 转换为 RGB
+        else:  # 灰度或其他格式
+            img = img.reshape((h.value, w.value)) if b.value != 16 else img.view(np.uint16).reshape((h.value, w.value))
 
-        if c.value == 1:
-            if self.camera_bit == 16:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint16).reshape((self.image_h, self.image_w))
-            else:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint8).reshape((self.image_h, self.image_w))
-        elif c.value == 3:
-            if self.camera_bit == 16:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint16).reshape((self.image_h, self.image_w, c.value))
-            else:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint8).reshape((self.image_h, self.image_w, c.value))
-        else:
-            raise ValueError("Unsupported number of channels")
-
-        self.sdk_output_queue.put({"order":"singleCapture_success",'data':imgdata_np})
+        self.sdk_output_queue.put({"order":"singleCapture_success",'data':{'img':img,'gps_data':gps_data}})
     
     def stop(self):
         self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle)

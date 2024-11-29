@@ -7,7 +7,6 @@ import numpy as np
 from ctypes import *
 import os
 import warnings
-from datetime import datetime
 import subprocess
 import cv2
 import time
@@ -19,7 +18,8 @@ from threading import Lock
 from astropy.stats import sigma_clipped_stats
 import multiprocessing
 from multiprocessing import shared_memory
-
+from datetime import datetime, timedelta
+import pytz
 
 # Import custom modules
 from .save_video import SaveThread
@@ -34,7 +34,6 @@ from .astrometry import AstrometrySolver, AstrometryDialog
 from .planned_shooting import PlannedShootingDialog
 from .qhyccd_sdk import QHYCCDSDK
 from .accept_sdk_data import AcceptSDKData
-
 
 class CameraControlWidget(QWidget):
     def __init__(self, napari_viewer):
@@ -62,37 +61,33 @@ class CameraControlWidget(QWidget):
         self.disconnect_camera()
         self.release_qhyccd_resource()
  
-    def closeEvent(self, event):
-        self.disconnect_camera()
-        self.release_qhyccd_resource()
-        super().closeEvent(event)
-        event.accept()  
-        
+    def clear_queue(self,q):
+        try:
+            while True:  # 持续尝试获取元素直到队列为空
+                q.get_nowait()
+        except queue.Empty:
+            pass 
+
     def release_qhyccd_resource(self):
         self.sdk_input_queue.put({"order":"stop", "data":''})
         self.memory_monitor_thread.stop()
     
     def stop_qhyccd_process_success(self):
-        self.sdk_input_queue.close()
-        self.sdk_output_queue.close()
-        self.accept_sdk_data.stop()
-        # 等待子进程释放共享内存
-        if self.shm1 is not None:
-            try:
-                self.shm1.close()
-                self.shm1.unlink()
-            except Exception as e:
-                self.append_text(f"Error unlinking shared memory {self.shm1.name}: {e}",True)
-        if self.shm2 is not None:
-            try:
-                self.shm2.close()
-                self.shm2.unlink()
-            except Exception as e:
-                self.append_text(f"Error unlinking shared memory {self.shm2.name}: {e}",True)
+        self.qhyccd_process = None
+        self.preview_state = False
+        self.clear_queue(self.sdk_input_queue)
+        self.clear_queue(self.sdk_output_queue)
+        self.init_sdk()
+        if self.settings_dialog.qhyccd_path_label.text() is None or self.settings_dialog.qhyccd_path_label.text() == "" or self.settings_dialog.qhyccd_path_label.text() == " ":
+            self.init_qhyccdResource()
+        else:
+            self.init_qhyccdResource(self.settings_dialog.qhyccd_path_label.text())
 
-        
     def init_parameters(self):
         self.system_name = os.name
+        
+        self.sdk_input_queue = None
+        self.sdk_output_queue = None
         
         # 初始化相机状态
         self.init_state = False
@@ -127,6 +122,7 @@ class CameraControlWidget(QWidget):
         self.image_y = 0
         self.image_w = 0
         self.image_h = 0
+        self.image_c = 1
         
         # 初始化相机ID
         self.camera_ids = None
@@ -158,13 +154,20 @@ class CameraControlWidget(QWidget):
     
         self.is_color_camera = False  # 新增变量，判断相机是否是彩色相机
         
-        self.planned_shooting_dialog = PlannedShootingDialog(self) # 创建计划拍摄对话框
+        self.planned_shooting_dialog = PlannedShootingDialog(self,language=self.language) # 创建计划拍摄对话框
         self.planned_shooting_dialog.plan_running_signal.connect(self.on_plan_running)
         
         self.temperature_update_timer = QTimer(self)
         self.temperature_update_timer.timeout.connect(self.update_current_temperature)
         
+        self.humidity_update_timer = QTimer(self)
+        self.humidity_update_timer.timeout.connect(self.update_current_humidity)
+        
         self.is_CFW_control = False  # 新增变量，判断相机是否连接滤镜轮
+        
+        self.planned_shooting_data = None
+        
+        self.GPS_control = False
         
         self.roi_points = []
         self.roi_layer = None
@@ -200,12 +203,15 @@ class CameraControlWidget(QWidget):
         self.init_image_control_ui()
         self.init_temperature_control_ui()
         self.init_CFW_control_ui()
-        
+        self.init_external_trigger_ui()
+        self.init_GPS_ui()
         self.init_ui_state()
-           
+        
     def init_sdk(self):
-        self.sdk_input_queue = multiprocessing.Queue()
-        self.sdk_output_queue = multiprocessing.Queue()
+        if self.sdk_input_queue is None:
+            self.sdk_input_queue = multiprocessing.Queue()
+        if self.sdk_output_queue is None:
+            self.sdk_output_queue = multiprocessing.Queue()
         self.qhyccd_process = QHYCCDSDK(self.sdk_input_queue, self.sdk_output_queue,self.language)
         self.qhyccd_process.start()
         self.accept_sdk_data = AcceptSDKData(self.sdk_output_queue)
@@ -340,12 +346,22 @@ class CameraControlWidget(QWidget):
         self.show_video_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/video_icon.png'))))  # 设置图标路径
         self.show_video_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_video_control'])
         
+        self.show_external_trigger_checkbox = QPushButton()
+        self.show_external_trigger_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/trigger_icon.png'))))  # 设置图标路径
+        self.show_external_trigger_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_external_trigger'])
+        
+        self.show_GPS_control_checkbox = QPushButton()
+        self.show_GPS_control_checkbox.setIcon(QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__), 'icon/GPS_icon.png'))))  # 设置图标路径
+        self.show_GPS_control_checkbox.setToolTip(translations[self.language]['qhyccd_capture']['show_GPS_control'])
+        
         self.show_settings_checkbox.clicked.connect(lambda: self.toggle_settings_box())
         self.show_control_checkbox.clicked.connect(lambda: self.toggle_control_box())
         self.show_image_control_checkbox.clicked.connect(lambda: self.toggle_image_control_box())
         self.show_temperature_control_checkbox.clicked.connect(lambda: self.toggle_temperature_control_box())
         self.show_CFW_control_checkbox.clicked.connect(lambda: self.toggle_CFW_control_box())
         self.show_video_control_checkbox.clicked.connect(lambda: self.toggle_video_control_box())
+        self.show_external_trigger_checkbox.clicked.connect(lambda: self.toggle_external_trigger_box())
+        self.show_GPS_control_checkbox.clicked.connect(lambda: self.toggle_GPS_control_box())
         
         grid_layout.addWidget(self.show_settings_checkbox,1,0)
         grid_layout.addWidget(self.show_control_checkbox,1,1)
@@ -353,6 +369,8 @@ class CameraControlWidget(QWidget):
         grid_layout.addWidget(self.show_video_control_checkbox,1,3)
         grid_layout.addWidget(self.show_temperature_control_checkbox,1,4)
         grid_layout.addWidget(self.show_CFW_control_checkbox,1,5)
+        grid_layout.addWidget(self.show_external_trigger_checkbox,1,6)
+        grid_layout.addWidget(self.show_GPS_control_checkbox,1,7)
         start_setting_layout.addRow(grid_layout)
         
         # 创建一个垂直方向的 spacer
@@ -368,6 +386,40 @@ class CameraControlWidget(QWidget):
     def init_settings_ui(self):
         self.settings_box = QGroupBox(translations[self.language]['qhyccd_capture']['camera_settings'])
         settings_layout = QFormLayout()
+
+        self.burst_mode = False
+        self.burst_mode_selector = QCheckBox(translations[self.language]['qhyccd_capture']['burst_mode'])
+        self.burst_mode_selector.stateChanged.connect(self.toggle_burst_control_box)
+        self.burst_mode_selector.setVisible(False)
+        settings_layout.addRow(self.burst_mode_selector)
+
+        # 创建水平布局以在同一行显示最小值和最大值输入控件
+        value_range_layout = QHBoxLayout()
+
+        # 添加最小值输入控件
+        self.burst_mode_min_value_selector_label = QLabel(translations[self.language]['qhyccd_capture']['min_value'])
+        self.burst_mode_min_value_selector = QSpinBox()
+        self.burst_mode_min_value_selector.setRange(0, 1000)  # 设置最小值和最大值范围
+        self.burst_mode_min_value_selector.setValue(0)  # 设置默认值
+        self.burst_mode_min_value_selector.setVisible(False)
+        self.burst_mode_min_value_selector_label.setVisible(False)
+        self.burst_mode_min_value_selector.valueChanged.connect(self.on_burst_mode_min_value_changed)
+        value_range_layout.addWidget(self.burst_mode_min_value_selector_label)
+        value_range_layout.addWidget(self.burst_mode_min_value_selector)
+
+        # 添加最大值输入控件
+        self.burst_mode_max_value_selector_label = QLabel(translations[self.language]['qhyccd_capture']['max_value'])
+        self.burst_mode_max_value_selector = QSpinBox()
+        self.burst_mode_max_value_selector.setRange(0, 1000)  # 设置最小值和最大值范围
+        self.burst_mode_max_value_selector.setValue(10)  # 设置默认值
+        self.burst_mode_max_value_selector.setVisible(False)
+        self.burst_mode_max_value_selector_label.setVisible(False)
+        self.burst_mode_max_value_selector.valueChanged.connect(self.on_burst_mode_max_value_changed)
+        value_range_layout.addWidget(self.burst_mode_max_value_selector_label)
+        value_range_layout.addWidget(self.burst_mode_max_value_selector)
+
+        # 将水平布局添加到设置布局中
+        settings_layout.addRow(value_range_layout)
 
         # 像素合并Bin选择框
         self.camera_pixel_bin = {'1*1':[1,1],'2*2':[2,2],'3*3':[3,3],'4*4':[4,4]}
@@ -500,9 +552,11 @@ class CameraControlWidget(QWidget):
         grid_layout = QGridLayout()
         self.start_button = QPushButton(translations[self.language]['qhyccd_capture']['start_capture'])
         self.planned_shooting_button = QPushButton(translations[self.language]['qhyccd_capture']['planned_shooting'])
+        
         self.save_button = QPushButton(translations[self.language]['qhyccd_capture']['save'])
         self.save_button.setToolTip(translations[self.language]['qhyccd_capture']['save_tooltip'])
         self.save_button.setVisible(False) # 默认隐藏保存按钮 -------------------------------------
+
         self.start_button.clicked.connect(self.start_capture)
         self.planned_shooting_button.clicked.connect(self.show_planned_shooting_dialog)
         self.save_button.clicked.connect(self.save_image)
@@ -797,6 +851,43 @@ class CameraControlWidget(QWidget):
         self.CFW_control_box.setLayout(CFW_layout)
         self.scroll_layout.addWidget(self.CFW_control_box)
     
+    def init_external_trigger_ui(self):
+        '''外部触发布局'''
+        self.external_trigger_box = QGroupBox(translations[self.language]['qhyccd_capture']['external_trigger'])
+        external_trigger_layout = QFormLayout()
+
+        # 启用外部触发的复选框
+        self.enable_external_trigger_checkbox = QCheckBox(translations[self.language]['qhyccd_capture']['enable_external_trigger'])
+        self.enable_external_trigger_checkbox.stateChanged.connect(self.toggle_external_trigger_enabled)
+        external_trigger_layout.addRow(self.enable_external_trigger_checkbox)
+
+        # 触发接口选择框
+        self.trigger_interface_choise = {}
+        self.trigger_interface_selector = QComboBox()
+        external_trigger_layout.addRow(QLabel(translations[self.language]['qhyccd_capture']['trigger_interface']), self.trigger_interface_selector)
+
+        # 使用触发输出的复选框
+        self.use_trigger_output_checkbox = QCheckBox(translations[self.language]['qhyccd_capture']['use_trigger_output'])
+        external_trigger_layout.addRow(self.use_trigger_output_checkbox)
+
+        self.external_trigger_box.setLayout(external_trigger_layout)
+        self.scroll_layout.addWidget(self.external_trigger_box)
+         
+    def init_GPS_ui(self):
+        '''GPS布局'''
+        self.GPS_control_box = QGroupBox(translations[self.language]['qhyccd_capture']['GPS_control'])
+        GPS_layout = QFormLayout()
+        
+        self.GPS_selector = QCheckBox(translations[self.language]['qhyccd_capture']['GPS_start'])
+        self.GPS_selector.stateChanged.connect(self.toggle_GPS_control)
+        GPS_layout.addRow(self.GPS_selector)
+        
+        self.GPS_data_label = QLabel()
+        GPS_layout.addRow(self.GPS_data_label)
+        
+        self.GPS_control_box.setLayout(GPS_layout)
+        self.scroll_layout.addWidget(self.GPS_control_box)
+         
     def init_ui_state(self):
         '''初始化UI状态'''
         # 创建一个垂直方向的 spacer
@@ -817,6 +908,8 @@ class CameraControlWidget(QWidget):
         self.temperature_control_box.setVisible(False)
         self.CFW_control_box.setVisible(False)
         self.video_control_box.setVisible(False)
+        self.external_trigger_box.setVisible(False)
+        self.GPS_control_box.setVisible(False)
         
         # 禁用复选框
         self.show_settings_checkbox.setEnabled(False)
@@ -825,6 +918,8 @@ class CameraControlWidget(QWidget):
         self.show_temperature_control_checkbox.setEnabled(False)
         self.show_CFW_control_checkbox.setEnabled(False)
         self.show_video_control_checkbox.setEnabled(False)    
+        self.show_external_trigger_checkbox.setEnabled(False)   
+        self.show_GPS_control_checkbox.setEnabled(False)
     
     def append_text(self, text, is_error=False):
         try:
@@ -889,7 +984,7 @@ class CameraControlWidget(QWidget):
             self.init_qhyccdResource_success(data['data'])
         if data['order'] == 'readCameraName_success':
             self.read_camera_name_success(data['data'])
-        if data['order'] == 'get_planned_shooting_data_success':
+        if data['order'] == 'getPlannedShootingData_success':
             self.update_planned_shooting_data(data['data'])
         if data['order'] == 'openCamera_success':
             self.open_camera_success(data['data'])
@@ -961,12 +1056,25 @@ class CameraControlWidget(QWidget):
             self.get_temperature_success(data['data'])
         if data['order'] == 'stop_success':
             self.stop_qhyccd_process_success()
-            
+        if data['order'] == 'runPlan_success':
+            self.on_plan_success(data['data'])
+        if data['order'] == 'setCFWFilter_success':
+            self.on_set_CFW_filter_success(data['data'])
+        if data['order'] == 'burst_mode_frame':
+            self.on_burst_mode_frame(data['data'])
+        if data['order'] == 'stopExternalTrigger_success':
+            self.stop_external_trigger_success(data['data'])    
+        if data['order'] == 'setGPSControl_success':
+            self.on_GPS_control_success(data['data'])
+           
     def init_qhyccdResource(self,file_path=None):
+        if self.sdk_input_queue is None:
+            return
         self.sdk_input_queue.put({'order':'init_qhyccd_resource', 'data':file_path})
         
     def init_qhyccdResource_success(self,qhyccddll):
-  
+        if self.sdk_input_queue is None:
+            return
         self.settings_dialog.qhyccd_path_label.setText(qhyccddll)
         self.disconnect_button.setEnabled(False)
         self.connect_button.setEnabled(True)
@@ -974,11 +1082,32 @@ class CameraControlWidget(QWidget):
         self.init_state = True
         self.sdk_input_queue.put({'order':'read_camera_name', 'data':''})
     
-    def update_image_buffer_size_success(self,image_buffer_size):
-        self.shm1 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
-        self.shm2 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
-        self.sdk_input_queue.put({'order':'set_image_buffer', 'data':{'shm1':self.shm1.name,'shm2':self.shm2.name}})
-        self.reset_camera_button.setEnabled(True)
+    def update_image_buffer_size_success(self, image_buffer_size):
+        if self.sdk_input_queue is None:
+            return
+        try:
+            if self.shm1 is not None:
+                # 确保释放所有对shm1的引用
+                if hasattr(self, 'shm1_view'):
+                    self.shm1_view.release()
+                    del self.shm1_view  # 显式删除引用
+                self.shm1.close()
+                self.shm1.unlink()
+            if self.shm2 is not None:
+                # 确保释放所有对shm2的引用
+                if hasattr(self, 'shm2_view'):
+                    self.shm2_view.release()
+                    del self.shm2_view  # 显式删除引用
+                self.shm2.close()
+                self.shm2.unlink()
+        except BufferError as e:
+            pass
+        finally:
+            # 创建新的共享内存
+            self.shm1 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
+            self.shm2 = shared_memory.SharedMemory(create=True, size=image_buffer_size)
+            self.sdk_input_queue.put({'order': 'set_image_buffer', 'data': {'shm1': self.shm1.name, 'shm2': self.shm2.name}})
+            self.reset_camera_button.setEnabled(True)
         
     def get_readout_mode_success(self,readout_mode_name_dict):
         self.readout_mode_name_dict = readout_mode_name_dict
@@ -991,26 +1120,40 @@ class CameraControlWidget(QWidget):
         self.camera_mode_selector.addItems(list(self.camera_mode_ids.keys()))
 
     def read_camera_name(self):
+        if self.sdk_input_queue is None:
+            return
         self.reset_camera_button.setEnabled(False)
         if not self.init_state:
             self.sdk_input_queue.put({'order':'init_qhyccd_resource', 'data':self.settings_dialog.qhyccd_path_label.text()})
         self.sdk_input_queue.put({'order':'read_camera_name', 'data':''})
     
     def read_camera_name_success(self,camera_ids):
+        if self.sdk_input_queue is None:
+            return
         self.camera_ids = camera_ids
+        self.connect_button.setEnabled(True)
         if self.camera_ids == []:
+            self.camera_selector.clear()
+            self.reset_camera_button.setEnabled(True)
             return
         else:
             self.camera_selector.clear()
             self.camera_selector.addItems(self.camera_ids)
             self.sdk_input_queue.put({'order':'open_camera', 'data':self.camera_selector.currentText()})
             self.sdk_input_queue.put({'order':'get_image_buffer_size', 'data':''})
-    
+            
     def connect_camera(self):
+        if self.sdk_input_queue is None:
+            return
+        if self.qhyccd_process is None:
+            self.init_sdk()
         if not self.camera_state:
             self.reset_camera_button.setEnabled(False)
             self.connect_button.setEnabled(False)
             self.disconnect_button.setEnabled(False)
+            self.camera_selector.setEnabled(False)
+            self.camera_mode_selector.setEnabled(False)
+            self.readout_mode_selector.setEnabled(False)  
             self.camera_name = self.camera_selector.currentText()
             self.camera_mode = self.camera_mode_selector.currentText()
             self.sdk_input_queue.put({'order':'init_camera', 'data':[self.camera_name, self.readout_mode_selector.currentText(), self.camera_mode_selector.currentText()]})
@@ -1032,11 +1175,18 @@ class CameraControlWidget(QWidget):
             self.update_CFW_control_success(data['CFW'])
             self.update_auto_exposure_success(data['auto_exposure'])
             self.update_auto_white_balance_success(data['auto_white_balance'])
+            self.update_external_trigger_success(data['external_trigger'])
             self.update_tiff_compression()
+            self.update_burst_mode_success(data['burst_mode'])
+            self.update_GPS_control_success(data['GPS_control'])
             # 启用复选框
             self.show_settings_checkbox.setEnabled(True)
             self.show_control_checkbox.setEnabled(True)
             self.show_image_control_checkbox.setEnabled(True)
+            
+            # 禁用自动曝光和自动白平衡
+            self.auto_exposure_button.setVisible(False)
+            self.auto_white_balance_button.setVisible(False)
             
             # 显示复选框
             self.toggle_settings_box(True)
@@ -1048,20 +1198,14 @@ class CameraControlWidget(QWidget):
             self.config_label.setText(f'{translations[self.language]["qhyccd_capture"]["connected"]}')
             self.config_label.setStyleSheet("color: green;")  # 设置字体颜色为绿色
             
-            # 初始禁用自动白平衡和自动曝光按钮
-            self.auto_white_balance_button.setVisible(False)
-            self.auto_exposure_button.setVisible(False)
-            
             self.reset_camera_button.setEnabled(False)
             self.connect_button.setEnabled(False)
-            self.disconnect_button.setEnabled(True)
-            self.camera_selector.setEnabled(False)
-            self.camera_mode_selector.setEnabled(False)
-            self.readout_mode_selector.setEnabled(False)
-
-            
+            self.disconnect_button.setEnabled(True) 
         except Exception as e:
             self.disconnect()
+            self.camera_selector.setEnabled(True)
+            self.camera_mode_selector.setEnabled(True)
+            self.readout_mode_selector.setEnabled(True)  
             self.connect_button.setEnabled(True)
             self.reset_camera_button.setEnabled(True)
             self.disconnect_button.setEnabled(False)
@@ -1106,7 +1250,8 @@ class CameraControlWidget(QWidget):
         self.temperature_control_box.setVisible(False)
         self.CFW_control_box.setVisible(False)
         self.video_control_box.setVisible(False)
-        
+        self.external_trigger_box.setVisible(False)
+        self.GPS_control_box.setVisible(False)
         # 取消选项
         self.toggle_settings_box(False)
         self.toggle_control_box(False)
@@ -1114,7 +1259,8 @@ class CameraControlWidget(QWidget):
         self.toggle_temperature_control_box(False)
         self.toggle_CFW_control_box(False)
         self.toggle_video_control_box(False)
-
+        self.toggle_external_trigger_box(False)
+        self.toggle_GPS_control_box(False)
         # 禁用复选框
         self.show_settings_checkbox.setEnabled(False)
         self.show_control_checkbox.setEnabled(False)
@@ -1122,6 +1268,8 @@ class CameraControlWidget(QWidget):
         self.show_temperature_control_checkbox.setEnabled(False)
         self.show_CFW_control_checkbox.setEnabled(False)
         self.show_video_control_checkbox.setEnabled(False)
+        self.show_external_trigger_checkbox.setEnabled(False)
+        self.show_GPS_control_checkbox.setEnabled(False)
         
         self.camera_state = False
         
@@ -1138,6 +1286,8 @@ class CameraControlWidget(QWidget):
         self.readout_mode_selector.setEnabled(True)
 
     def on_camera_changed(self):
+        if self.sdk_input_queue is None:
+            return
         self.camera_selector.setEnabled(False)
         if self.camhandle != 0:
             self.sdk_input_queue.put({'order':'close_camera', 'data':False})
@@ -1153,13 +1303,16 @@ class CameraControlWidget(QWidget):
         self.camera_mode_selector.clear()
         self.camera_mode_selector.addItems(list(self.camera_mode_ids.keys()))
         self.camera_selector.setEnabled(True)
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({'order':'get_planned_shooting_data', 'data':''})
                
     def end_capture(self):
         if self.capture_status_label.text().startswith(translations[self.language]["qhyccd_capture"]["capturing"]):
             self.capture_status_label.setText(translations[self.language]["qhyccd_capture"]["capture_complete"])
                
-    def update_camera_color(self):   
-        self.sdk_input_queue.put({'order':'get_is_color_camera', 'data':''})
+    def update_camera_color(self):
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({'order':'get_is_color_camera', 'data':''})
         
     def update_camera_color_success(self, is_color_camera):
         self.is_color_camera = is_color_camera
@@ -1419,12 +1572,13 @@ class CameraControlWidget(QWidget):
             self.start_preview()
             self.fps_label.setVisible(True)
             self.fps_label.setStyleSheet("color: green;")
+            self.burst_mode_selector.setVisible(True)
         else:
             self.video_control_box.setVisible(False)
             self.show_video_control_checkbox.setVisible(False)
             self.show_video_control_checkbox.setEnabled(False)
             self.fps_label.setVisible(False)
-            
+            self.burst_mode_selector.setVisible(False)
         # self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_camera_mode"]}：{self.camera_mode}')
     
     def update_camera_temperature(self):
@@ -1532,7 +1686,52 @@ class CameraControlWidget(QWidget):
             self.auto_white_balance_dialog = AutoWhiteBalanceDialog(self.camera,self.sdk_input_queue,self.language)
         else:
             self.auto_white_balance_button.setVisible(False)
+       
+    def update_external_trigger_success(self,data):
+        self.external_trigger_is_available = data[0]
+        self.trigger_interface_choise = data[1]
+        if self.external_trigger_is_available and len(self.trigger_interface_choise) > 0:
+           self.show_external_trigger_checkbox.show()
+           self.external_trigger_box.setVisible(True)
+           self.toggle_external_trigger_box(True)
+           self.show_external_trigger_checkbox.setEnabled(True)
+           self.trigger_interface_selector.clear()
+           self.trigger_interface_selector.addItems(list(self.trigger_interface_choise.keys()))
+        else:
+            self.external_trigger_box.setVisible(False)
+            self.show_external_trigger_checkbox.hide()
+            self.toggle_external_trigger_box(False)
+            self.show_external_trigger_checkbox.setEnabled(False)
+            
+    def update_burst_mode(self):
+        if self.sdk_input_queue is None:
+            return
+        self.sdk_input_queue.put({'order':'get_burst_mode_is_available', 'data':''})
         
+    def update_burst_mode_success(self,data):
+        self.burst_mode_is_available = data
+        if self.burst_mode_is_available and self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            self.burst_mode_selector.setVisible(True)
+        else:
+            self.burst_mode_selector.setVisible(False)
+    
+    def update_GPS_control(self):
+        if self.sdk_input_queue is None:
+            return
+        self.sdk_input_queue.put({'order':'get_GPS_control', 'data':''})
+        
+    def update_GPS_control_success(self,data):
+        if data:
+            self.show_GPS_control_checkbox.show()
+            self.GPS_control_box.setVisible(True)
+            self.toggle_GPS_control_box(True)
+            self.show_GPS_control_checkbox.setEnabled(True)
+        else:
+            self.GPS_control_box.setVisible(False)
+            self.show_GPS_control_checkbox.hide()
+            self.toggle_GPS_control_box(False)
+            self.show_GPS_control_checkbox.setEnabled(False)
+    
     # 设置分辨率
     def on_set_resolution_clicked(self):
         x = int(self.x.value())
@@ -1649,8 +1848,54 @@ class CameraControlWidget(QWidget):
         if not visible:
             self.layout().removeWidget(self.video_control_box) # type: ignore
     
+    def toggle_external_trigger_box(self,state = None):
+        if state is None:
+            visible = not self.external_trigger_box.isVisible()
+        else:
+            visible = state
+        self.external_trigger_box.setVisible(visible)
+        self.show_external_trigger_checkbox.setStyleSheet("background-color: green;" if visible else "")  # 设置按钮颜色
+     
+    def toggle_burst_control_box(self,state):
+        if self.sdk_input_queue is None:
+            return
+        if self.camera_mode != translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+            self.burst_mode_selector.setVisible(False)
+            return
+        
+        if state == Qt.CheckState.Checked:
+            self.burst_mode = True
+            self.sdk_input_queue.put({'order':'set_burst_mode', 'data':(True,self.burst_mode_min_value_selector.value(),self.burst_mode_max_value_selector.value())})
+            self.video_control_box.setEnabled(False)
+            self.burst_mode_max_value_selector_label.setVisible(True)
+            self.burst_mode_max_value_selector.setVisible(True)
+            self.burst_mode_max_value_selector.setEnabled(True)
+            self.burst_mode_min_value_selector_label.setVisible(True)
+            self.burst_mode_min_value_selector.setVisible(True)
+            self.burst_mode_min_value_selector.setEnabled(True)
+        else:
+            self.burst_mode = False
+            self.sdk_input_queue.put({'order':'set_burst_mode', 'data':(False,0,0)})
+            self.video_control_box.setEnabled(True)
+            self.burst_mode_max_value_selector_label.setVisible(False)
+            self.burst_mode_max_value_selector.setVisible(False)
+            self.burst_mode_max_value_selector.setEnabled(False)
+            self.burst_mode_min_value_selector_label.setVisible(False)
+            self.burst_mode_min_value_selector.setVisible(False)
+            self.burst_mode_min_value_selector.setEnabled(False)
+     
+    def toggle_GPS_control_box(self,state = None): 
+        if state is None:
+            visible = not self.GPS_control_box.isVisible()
+        else:
+            visible = state
+        self.GPS_control_box.setVisible(visible)
+        self.show_GPS_control_checkbox.setStyleSheet("background-color: green;" if visible else "")  # 设置按钮颜色
+     
     @pyqtSlot(int)
     def on_pixel_bin_changed(self, index):
+        if self.sdk_input_queue is None:
+            return
         if not self.camera_state:
             return 
         bin_size = self.pixel_bin_selector.itemText(index)
@@ -1710,13 +1955,15 @@ class CameraControlWidget(QWidget):
         self.sdk_input_queue.put({'order':'set_camera_depth', 'data':self.camera_depth_options[depth]})
         
     def on_set_depth_success(self,data):
+        self.camera_bit = data
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"] and self.preview_state:
             self.update_shared_image()
             self.update_tiff_compression()
-        self.camera_bit = data
-
+        
     @pyqtSlot(int)
     def on_Debayer_mode_changed(self, index):
+        if self.sdk_input_queue is None:
+            return
         if not self.camera_state:
             return 
         # 获取选中的Debayer模式
@@ -1731,6 +1978,10 @@ class CameraControlWidget(QWidget):
             self.set_resolution_button.setEnabled(not self.camera_Debayer_mode[mode])
             self.show_roi_button.setEnabled(not self.camera_Debayer_mode[mode])
         self.sdk_input_queue.put({'order':'update_debayer_mode', 'data':self.camera_Debayer_mode[mode]})
+        if self.camera_Debayer_mode[mode] :
+            self.image_c = 3
+        else:
+            self.image_c = 1
         if self.camera_Debayer_mode[mode]:
             self.pixel_bin_selector.setEnabled(False)
         else:
@@ -1741,12 +1992,19 @@ class CameraControlWidget(QWidget):
         self.update_tiff_compression()
     
     def start_capture(self):
+        if self.sdk_input_queue is None:
+            return
+        if self.burst_mode:
+            self.sdk_input_queue.put({'order':'start_burst_mode', 'data':(True,self.burst_mode_min_value_selector.value(),self.burst_mode_max_value_selector.value())})
+            return
         if self.capture_in_progress :
             self.cancel_capture()
             return
         self.capture_in_progress = True
         if self.camera_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
-            self.on_capture_finished(self.preview_image)
+            if 'QHY-Preview' in self.viewer.layers:
+                preview_image = self.viewer.layers['QHY-Preview'].data
+                self.on_capture_finished({'img':preview_image,'gps_data':None})
             return
         
         self.start_button.setText(translations[self.language]["qhyccd_capture"]["cancel_capture"])
@@ -1758,7 +2016,9 @@ class CameraControlWidget(QWidget):
                 self.image_c = 1
             self.sdk_input_queue.put({'order':'singleCapture', 'data':(self.image_w, self.image_h, self.image_c,self.camera_bit,)})
             
-    def on_capture_finished(self, imgdata_np):
+    def on_capture_finished(self, data):
+        imgdata_np = data['img']
+        gps_data = data['gps_data']
         if not self.capture_in_progress :
             return
 
@@ -1779,6 +2039,8 @@ class CameraControlWidget(QWidget):
                 }
                 self.fits_header_dialog.update_table_with_dict(dict_value)
 
+        if gps_data is not None:
+            self.update_GPS_data(gps_data)
 
         # 获取当前时间并格式化
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -2192,7 +2454,8 @@ class CameraControlWidget(QWidget):
 
     def update_current_temperature(self):
         """更新当前温度显示"""
-        self.sdk_input_queue.put({"order":"get_temperature",'data':''})
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({"order":"get_temperature",'data':''})
               
     def get_temperature_success(self,data):
         self.current_temperature_label.setText(f'{translations[self.language]["qhyccd_capture"]["temperature"]}: {data:.2f} °C')
@@ -2202,12 +2465,23 @@ class CameraControlWidget(QWidget):
         if self.has_temperature_control:
             self.sdk_input_queue.put({"order":"set_temperature","data":value})
                 
+    def update_current_humidity(self):
+        """更新当前湿度显示"""
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({"order":"get_humidity",'data':''})
+                
     def on_CFW_filter_changed(self, index):
+        if self.sdk_input_queue is None:
+            return
         self.CFW_id = self.CFW_filter_selector.itemText(index)
         if self.CFW_id == "None" or self.CFW_id == "" or self.CFW_id == " ":
             return 
+        self.CFW_filter_selector.setEnabled(False)
         self.sdk_input_queue.put({"order":"setCFWFilter","data":self.CFW_id})
     
+    def on_set_CFW_filter_success(self,data):
+        self.CFW_filter_selector.setEnabled(True)
+        
     def swap_elements(self, dictionary, key):
         """
         将指定键的值移到字典的开头，并返回更新后的字典。
@@ -2324,6 +2598,7 @@ class CameraControlWidget(QWidget):
         image_size = data["image_size"]
         image_w, image_h, image_c, image_b = data["shape"]
         shm_status = data["shm_status"]
+        gps_data = data["gps_data"]
         try:
             if shm_status:
                 with self.lock:
@@ -2333,11 +2608,19 @@ class CameraControlWidget(QWidget):
                 with self.lock:
                     if self.shm2 is not None:
                         imgdata_np = self.shm2.buf[:image_size]  # 尝试从共享内存中获取数据
+                        expect_size = image_w * image_h * image_c * (image_b // 8)
+                        if len(imgdata_np) != expect_size:
+                            self.append_text(translations[self.language]['debug']['shm_data_size_error'],True)
+                            return
             imgdata_np = np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h) if image_c == 1 else np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h, image_c)
+        except ValueError:
+            return  # 退出函数
         except queue.Empty:
-            return  # 退出函数或执行其他逻辑
+            return  # 退出函数
         if imgdata_np is None:
             return
+        self.update_GPS_data(gps_data)
+        
         # 传输数据到保存
         if self.is_recording:
             if self.file_format == "fits":
@@ -2431,7 +2714,6 @@ class CameraControlWidget(QWidget):
             
         if (self.last_histogram_update_time is None or current_time - self.last_histogram_update_time > 0.1) and self.histogram_layer_name == "QHY-Preview":
             self.img_buffer.put(imgdata_np)
-            # self.histogram_widget.update_histogram()
             self.last_histogram_update_time = current_time
             if self.contrast_limits_name != 'QHY-Preview':
                 self.contrast_limits_name = 'QHY-Preview'
@@ -2474,6 +2756,8 @@ class CameraControlWidget(QWidget):
             self.bind_contrast_limits_event()
 
     def bind_contrast_limits_event(self):
+        if self.contrast_limits_name is None or self.contrast_limits_name not in self.viewer.layers:
+            return
         # 绑定当前图层的对比度限制变化事件
         current_layer = self.viewer.layers[self.contrast_limits_name]
         try:
@@ -2483,9 +2767,13 @@ class CameraControlWidget(QWidget):
 
     def on_contrast_limits_change(self, event):
         if self.contrast_limits_name in self.viewer.layers:
-            # 当对比度限制变化时触发的函数
-            contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
-            self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
+            try:    
+                # 当对比度限制变化时触发的函数
+                contrast_limits = self.viewer.layers[self.contrast_limits_name].contrast_limits
+                self.histogram_widget.update_min_max_lines(contrast_limits[0], contrast_limits[1])
+            except Exception as e:
+                self.append_text(f"Error on_contrast_limits_change: {e}",True)
+                return
 
     def toggle_auto_exposure(self):
         self.auto_exposure_dialog.exec_() # type: ignore
@@ -2522,7 +2810,6 @@ class CameraControlWidget(QWidget):
         for layer in reversed(self.viewer.layers):
             if isinstance(layer, napari.layers.Image):  # type: ignore
                 return layer.data
-        # 如果没有找到图像图层，返回None
         return None
            
     def star_analysis(self):
@@ -2562,7 +2849,6 @@ class CameraControlWidget(QWidget):
 
             # 创建点的列表
             points = []
-
             # 填充表格并添加点
             for i, star in enumerate(sources):
                 for j, col_name in enumerate(sources.colnames):
@@ -2574,10 +2860,8 @@ class CameraControlWidget(QWidget):
                 # 添加点到列表
                 point = [star['ycentroid'], star['xcentroid']]
                 points.append(point)
-
             # 显示表格
             self.star_table.show()
-
             # 在 napari 查看器中添加点图层
             if 'Star Points' in self.viewer.layers:
                 self.viewer.layers['Star Points'].data = points
@@ -2743,17 +3027,193 @@ class CameraControlWidget(QWidget):
         self.planned_shooting_dialog.show()
         
     def update_planned_shooting_data(self,data):
+        self.planned_shooting_data = data
         self.planned_shooting_dialog.updateTableOptions(data)
 
     def on_plan_running(self,data):
-        self.sdk_thread.runPlan_signal.emit(data)
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({'order':'run_plan', 'data':data})
         
     def on_plan_success(self,image_data):
         self.planned_shooting_dialog.update_row_state()
         self.viewer.add_image(image_data, name='Plan Shooting')
         
+    def toggle_external_trigger_enabled(self,state):
+        if self.sdk_input_queue is not None:
+            self.trigger_interface_selector.setEnabled(not state)
+            self.use_trigger_output_checkbox.setEnabled(not state)
+            self.settings_box.setEnabled(not state)
+            self.video_control_box.setEnabled(not state)
+            if state:
+                self.temperature_update_timer.stop()
+                self.sdk_input_queue.put({'order':'set_external_trigger', 'data':(self.trigger_interface_selector.currentText(), self.use_trigger_output_checkbox.isChecked(), (self.image_w, self.image_h, self.image_c, self.camera_bit))})
+            else:
+                self.sdk_input_queue.put({'order':'stop_external_trigger', 'data':''})
+                self.temperature_update_timer.start(5000)
+
+    def stop_external_trigger_success(self,data):
+        self.on_set_resolution_clicked()
+        
+    def on_burst_mode_min_value_changed(self,value):
+        if self.burst_mode_min_value_selector.value() > self.burst_mode_max_value_selector.value():
+            self.burst_mode_min_value_selector.setValue(self.burst_mode_max_value_selector.value()-2)
+
+    def on_burst_mode_max_value_changed(self,value):
+        if self.burst_mode_min_value_selector.value() > self.burst_mode_max_value_selector.value():
+            self.burst_mode_max_value_selector.setValue(self.burst_mode_min_value_selector.value()+2)
+        
+    def on_burst_mode_frame(self,data):
+        image_size = data["image_size"]
+        image_w, image_h, image_c, image_b = data["shape"]
+        shm_status = data["shm_status"]
+        gps_data = data["gps_data"]
+        try:
+            if shm_status:
+                with self.lock:
+                    if self.shm1 is not None:
+                        imgdata_np = self.shm1.buf[:image_size]  # 尝试从共享内存中获取数据
+            else:
+                with self.lock:
+                    if self.shm2 is not None:
+                        imgdata_np = self.shm2.buf[:image_size]  # 尝试从共享内存中获取数据
+                        expect_size = image_w * image_h * image_c * (image_b // 8)
+                        if len(imgdata_np) != expect_size:
+                            self.append_text(translations[self.language]['debug']['shm_data_size_error'],True)
+                            return
+            imgdata_np = np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h) if image_c == 1 else np.frombuffer(imgdata_np, dtype=np.uint8 if image_b == 8 else np.uint16).reshape(image_w, image_h, image_c)
+        except ValueError:
+            return  # 退出函数
+        except queue.Empty:
+            return  # 退出函数
+        if imgdata_np is None:
+            return
+        self.update_GPS_data(gps_data)
+        if self.is_color_camera and self.bayer_conversion != "None":
+            imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
+        self.viewer.add_image(imgdata_np, name='Burst Mode')
+    
+    def toggle_GPS_control(self,state):
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({'order':'set_GPS_control', 'data':state})
+    
+    def on_GPS_control_success(self,data):
+        self.GPS_control = data
+    
+    def is_leap_year(self,year):
+        """判断是否为闰年"""
+        return year % 400 == 0 or (year % 4 == 0 and year % 100 != 0)
+
+    def seconds_to_time(self, sec, usec, timezone='US/Eastern'):
+        """将秒和微秒转换为从1995年10月10日开始的完整日期时间对象，精确到秒，并考虑闰年"""
+        # 将微秒转换为秒
+        full_seconds = sec + usec / 1_000_000
+        # 创建基准日期1995年10月10日
+        base_date = datetime(1995, 10, 10)
+        # 计算最终日期时间
+        final_date = base_date + timedelta(seconds=full_seconds)
+
+        # 处理日期，考虑闰年
+        year = final_date.year
+        month = final_date.month
+        day = final_date.day
+        hour = final_date.hour
+        minute = final_date.minute
+        second = final_date.second
+
+        # 调整日期和时间
+        days_in_month = [31, 28 + self.is_leap_year(year), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        while day > days_in_month[month - 1]:
+            day -= days_in_month[month - 1]
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+        # 重新构建日期时间对象
+        adjusted_date = datetime(year, month, day, hour, minute, second)
+        # 转换为指定时区
+        tz = pytz.timezone(timezone)
+        local_time = adjusted_date.replace(tzinfo=pytz.utc).astimezone(tz)
+        # 格式化时间为年月日，时分秒
+        return local_time.strftime('%Y-%m-%d %H:%M:%S')
+    
+    def parse_gps_data(self,gps_data):
+        gps = np.array(gps_data, dtype=np.uint8)  # 假设gps_data已经是一个字节数组
+
+        # 在进行计算之前，将需要用于计算的元素转换为 int 类型
+        # GPS状态
+        now_flag = (int(gps[33]) // 16) % 4
+        # PPS计数值
+        pps = 256*256*int(gps[41]) + 256*int(gps[42]) + int(gps[43])
+        # 帧序号
+        seqNumber = 256*256*256*int(gps[0]) + 256*256*int(gps[1]) + 256*int(gps[2]) + int(gps[3])
+        # 图像宽度
+        width = 256*int(gps[5]) + int(gps[6])
+        # 图像高度
+        height = 256*int(gps[7]) + int(gps[8])
+
+        # 纬度解析
+        temp = 256*256*256*int(gps[9]) + 256*256*int(gps[10]) + 256*int(gps[11]) + int(gps[12])
+        south = temp > 1000000000
+        deg = (temp % 1000000000) // 10000000
+        min = (temp % 10000000) // 100000
+        fractMin = (temp % 100000) / 100000.0
+        latitude = (deg + (min + fractMin) / 60.0) * (1 if not south else -1)
+
+        # 经度解析
+        temp = 256*256*256*int(gps[13]) + 256*256*int(gps[14]) + 256*int(gps[15]) + int(gps[16])
+        west = temp > 1000000000
+        deg = (temp % 1000000000) // 1000000
+        min = (temp % 1000000) // 10000
+        fractMin = (temp % 10000) / 10000.0
+        longitude = (deg + (min + fractMin) / 60.0) * (1 if not west else -1)
+
+        # 时间解析
+        start_sec = 256*256*256*int(gps[18]) + 256*256*int(gps[19]) + 256*int(gps[20]) + int(gps[21])
+        start_us = (256*256*int(gps[22]) + 256*int(gps[23]) + int(gps[24])) // 10
+        end_sec = 256*256*256*int(gps[26]) + 256*256*int(gps[27]) + 256*int(gps[28]) + int(gps[29])
+        end_us = (256*256*int(gps[30]) + 256*int(gps[31]) + int(gps[32])) // 10
+        now_sec = 256*256*256*int(gps[34]) + 256*256*int(gps[35]) + 256*int(gps[36]) + int(gps[37])
+        now_us = (256*256*int(gps[38]) + 256*int(gps[39]) + int(gps[40])) // 10
+
+        start_time = self.seconds_to_time(start_sec, start_us)
+        end_time = self.seconds_to_time(end_sec, end_us)
+        current_time = self.seconds_to_time(now_sec, now_us)
+
+        # 曝光时间计算
+        exposure = (end_sec - start_sec) * 1000000 + (end_us - start_us)
+
+        return {
+            "now_flag": now_flag,
+            "pps": pps,
+            "seqNumber": seqNumber,
+            "width": width,
+            "height": height,
+            "latitude": latitude,
+            "longitude": longitude,
+            "start_time": start_time,
+            "end_time": end_time,
+            "current_time": current_time,
+            "exposure": exposure
+        }
+    
+    def update_GPS_data(self, data):
+        if data is None or len(data) == 0:
+            return
+        data_dict = self.parse_gps_data(data)
+        # 将数据字典转换为键值对字符串，确保冒号对齐
+        max_key_length = max(len(key) for key in data_dict.keys())  # 获取最长键的长度
+        html = "<pre>"
+        for key, value in data_dict.items():
+            # 使用ljust确保键对齐
+            html += f"{key.ljust(max_key_length)} : {value}\n"
+        html += "</pre>"
+
+        # 设置QLabel的文本
+        self.GPS_data_label.setText(html)
+    
 @napari_hook_implementation
 def napari_experimental_provide_dock_widget():
     """注册插件窗口部件"""
-    return [CameraControlWidget]
+    return CameraControlWidget
 

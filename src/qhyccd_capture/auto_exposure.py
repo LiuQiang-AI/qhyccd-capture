@@ -124,8 +124,6 @@ class AutoExposureDialog(QDialog):
             pass
         
         self.mode_changed.emit(mode)
-        self.parent.append_text(f"{translations[self.language]['auto_exposure']['apply_success']}:{self.exposure_mode_combo.currentText()}")
-        
         self.initial_exposure_mode = self.exposure_mode_combo.currentIndex()
         self.initial_mask_mode = self.mask_mode_combo.currentIndex()
         self.initial_exposure_time = self.exposure_time.value()

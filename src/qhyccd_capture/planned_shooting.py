@@ -3,17 +3,19 @@ import json
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QComboBox, QTableWidget, QPushButton, QTableWidgetItem, QTimeEdit, QSpinBox, QDoubleSpinBox, QHeaderView, QInputDialog, QMessageBox
 from PyQt5.QtCore import Qt, QTime, QTimer, pyqtSignal
 from functools import partial
+from .language import translations
 
 class PlannedShootingDialog(QDialog):
     plan_running_signal = pyqtSignal(dict)  # 定义信号
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None,language='cn'):
         super().__init__(parent)
+        self.language = language
         self.data_dict = {}
         self.current_row = 0
         self.running_row = 0
         
-        self.setWindowTitle("Planned Shooting")
+        self.setWindowTitle(translations[self.language]['planned_shooting']['window_title'])
         self.setGeometry(100, 100, 800, 600)
 
         layout = QVBoxLayout(self)
@@ -22,7 +24,7 @@ class PlannedShootingDialog(QDialog):
         self.planComboBox = QComboBox()
         self.planComboBox.addItem("None")  # 默认选项
         layout.addWidget(self.planComboBox)
-        self.label_text = ["相机", "读出模式", "间隔时长", "曝光时长", "增益", "偏置", "位数", "滤镜", "状态"]
+        self.label_text = [translations[self.language]['planned_shooting']['camera'], translations[self.language]['planned_shooting']['readout_mode'], translations[self.language]['planned_shooting']['interval'], translations[self.language]['planned_shooting']['exposure'], translations[self.language]['planned_shooting']['gain'], translations[self.language]['planned_shooting']['offset'], translations[self.language]['planned_shooting']['depth'], translations[self.language]['planned_shooting']['CFW'], translations[self.language]['planned_shooting']['status']]
         self.table = QTableWidget()
         self.table.setColumnCount(len(self.label_text))
         self.table.setHorizontalHeaderLabels(self.label_text)
@@ -33,17 +35,17 @@ class PlannedShootingDialog(QDialog):
         header.setSectionResizeMode(QHeaderView.Stretch) # type: ignore
 
         tableControlLayout = QHBoxLayout()
-        self.addButton = QPushButton("添加行")
-        self.removeButton = QPushButton("删除行")
+        self.addButton = QPushButton(translations[self.language]['planned_shooting']['add_row'])
+        self.removeButton = QPushButton(translations[self.language]['planned_shooting']['remove_row'])
         tableControlLayout.addWidget(self.addButton)
         tableControlLayout.addWidget(self.removeButton)
         layout.addLayout(tableControlLayout)
 
         buttonsLayout = QHBoxLayout()
-        self.startButton = QPushButton("开始计划")
-        self.cancelButton = QPushButton("取消计划")
-        self.saveButton = QPushButton("保存计划表")
-        self.deleteButton = QPushButton("删除计划表")
+        self.startButton = QPushButton(translations[self.language]['planned_shooting']['start_plan'])
+        self.cancelButton = QPushButton(translations[self.language]['planned_shooting']['cancel_plan'])
+        self.saveButton = QPushButton(translations[self.language]['planned_shooting']['save_plan'])
+        self.deleteButton = QPushButton(translations[self.language]['planned_shooting']['delete_plan'])
         buttonsLayout.addWidget(self.startButton)
         buttonsLayout.addWidget(self.cancelButton)
         buttonsLayout.addWidget(self.saveButton)
@@ -69,7 +71,7 @@ class PlannedShootingDialog(QDialog):
         self.loadPlans()
 
     def savePlan(self):
-        plan_name, ok = QInputDialog.getText(self, "保存计划", "输入计划名称:")
+        plan_name, ok = QInputDialog.getText(self, translations[self.language]['planned_shooting']['save_plan'], translations[self.language]['planned_shooting']['input_plan_name'])
         if ok and plan_name:
             plan_data = self.collectPlanData()
             
@@ -80,7 +82,7 @@ class PlannedShootingDialog(QDialog):
             all_plans[plan_name] = plan_data
             with open("plans.json", "w", encoding='utf-8') as file:
                 json.dump(all_plans, file, ensure_ascii=False, indent=4)
-            QMessageBox.information(self, "保存成功", "计划已成功保存！")
+            QMessageBox.information(self, translations[self.language]['planned_shooting']['save_success'], translations[self.language]['planned_shooting']['plan_saved_successfully'])
             
             # 自动调整选择的计划表为保存的计划表
             if self.planComboBox.findText(plan_name) == -1:
@@ -91,7 +93,7 @@ class PlannedShootingDialog(QDialog):
         plan_name = self.planComboBox.currentText()  # 获取当前选择的计划表
         if plan_name and plan_name != "None":  # 确保选中的计划表不是 None
             # 弹出确认对话框
-            reply = QMessageBox.question(self, "确认删除", f"您确定要删除计划 '{plan_name}' 吗？", 
+            reply = QMessageBox.question(self, translations[self.language]['planned_shooting']['confirm_delete'], f"{translations[self.language]['planned_shooting']['confirm_delete_message']} '{plan_name}' {translations[self.language]['planned_shooting']['confirm_delete_message_2']}", 
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 all_plans = self.loadAllPlans()
@@ -99,7 +101,7 @@ class PlannedShootingDialog(QDialog):
                     del all_plans[plan_name]
                     with open("plans.json", "w") as file:
                         json.dump(all_plans, file)
-                    QMessageBox.information(self, "删除成功", "计划已成功删除！")
+                    QMessageBox.information(self, translations[self.language]['planned_shooting']['delete_success'], translations[self.language]['planned_shooting']['plan_deleted_successfully'])
                     self.planComboBox.removeItem(self.planComboBox.findText(plan_name))
 
     def loadPlan(self):
@@ -365,21 +367,20 @@ class PlannedShootingDialog(QDialog):
         self.table.setRowCount(0)
         
     def startPlan(self):
-        reply = QMessageBox.question(self, "确认执行", "您确定要开始计划吗？", 
+        reply = QMessageBox.question(self, translations[self.language]['planned_shooting']['confirm_execute'], translations[self.language]['planned_shooting']['confirm_execute_message'], 
                                  QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            if self.current_row != 0 or self.running_row != 0 and self.current_row < self.table.rowCount()-1:
-                continue_reply = QMessageBox.question(self, "继续执行", "当前有计划执行中断，您要继续吗？", 
+            if self.current_row != 0 and self.current_row < self.table.rowCount()-1:
+                continue_reply = QMessageBox.question(self, translations[self.language]['planned_shooting']['continue_execute'], translations[self.language]['planned_shooting']['continue_execute_message'], 
                                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if continue_reply == QMessageBox.No:
-                    self.current_row = 0  # 重置当前行
-                    for i in range(self.table.rowCount()):
-                        self.table.item(i, 8).setText('')
-                else:
-                    self.current_row = self.running_row  # 设置当前行为正在执行的行
+                if continue_reply == QMessageBox.Yes:
                     for i in range(self.current_row, self.table.rowCount()):
                         self.table.item(i, 8).setText('')
-            print(f"开始执行当前行: {self.current_row}")
+                    self.executeRow(self.current_row)
+                    return
+            self.current_row = 0  # 重置当前行
+            for i in range(self.table.rowCount()):
+                self.table.item(i, 8).setText('')
             self.executeRow(self.current_row)  # 开始执行当前行
 
     def executeRow(self, row):
@@ -387,43 +388,53 @@ class PlannedShootingDialog(QDialog):
             time = self.table.cellWidget(row, 2).time()  # 获取当前行的时间
             countdown_seconds = time.hour() * 3600 + time.minute() * 60 + time.second()
             
-            # 检查第六列的单元格是否存在
-            status_item = self.table.item(row, 8)  # 获取状态单元格
-            if status_item is None:  # 如果状态单元格不存在，创建一个新的 QTableWidgetItem
-                status_item = QTableWidgetItem('')
-                self.table.setItem(row, 8, status_item)
-
-            if status_item.text() == '执行完成':
-                self.current_row += 1
-                self.executeRow(self.current_row)
-            else:
-                self.timer.start(1000)  # 每秒更新一次
-                self.remaining_time = countdown_seconds  # 设置剩余时间
+            self.current_row = row
+            self.timer.start(1000)  # 每秒更新一次
+            self.remaining_time = countdown_seconds  # 设置剩余时间
         else:
             self.timer.stop()
-            self.current_row = 0
+            self.current_row = row
+            self.plan_running_signal.emit({'end':True})  # 发送信号
 
     def updateCountdown(self):
         if self.remaining_time > 0:
             self.remaining_time -= 1
             # 更新表格中的时间
             self.table.cellWidget(self.current_row, 2).setTime(QTime.fromString(QTime(0, 0).addSecs(self.remaining_time).toString("HH:mm:ss"), "HH:mm:ss"))
+            self.table.item(self.current_row, 8).setText(f'{translations[self.language]["planned_shooting"]["remaining_time"]}: {self.remaining_time}s')  # 更新状态为剩余时间
         else:
             self.timer.stop()  # 停止定时器
-            if self.current_row > 0 and self.table.item(self.running_row, 8).text() != '执行完成':
-                self.timer.start(1000)  # 如果上一行未完成，重新开始倒计时
-                return
-            self.table.item(self.current_row, 8).setText('正在执行')
-            self.running_row = self.current_row
-            self.current_row += 1  # 移动到下一行
-            self.plan_running_signal.emit(self.collectSingleRowData(self.running_row))  # 发送信号
-            self.executeRow(self.current_row)  # 执行下一行
+            if self.current_row  == 0:
+                self.plan_running_signal.emit(self.collectSingleRowData(self.current_row))  # 发送信号
+                self.table.item(self.current_row, 8).setText(translations[self.language]['planned_shooting']['executing'])  # 更新状态为执行完成
+                self.executeRow(self.current_row+1)
+            elif self.current_row > 0 :
+                status_item = self.table.item(self.current_row-1, 8)  # 获取状态单元格
+                if status_item is None:  # 如果状态单元格不存在，创建一个新的 QTableWidgetItem
+                    status_item = QTableWidgetItem('')
+                    self.table.setItem(self.current_row-1, 8, status_item)
+                if status_item.text() == translations[self.language]['planned_shooting']['executed']:
+                    self.table.item(self.current_row, 8).setText(translations[self.language]['planned_shooting']['executing'])  # 更新状态为执行完成
+                    self.plan_running_signal.emit(self.collectSingleRowData(self.current_row))  # 发送信号
+                    self.executeRow(self.current_row+1)
+                else:
+                    self.table.item(self.current_row, 8).setText(translations[self.language]['planned_shooting']['waiting'])  # 更新状态为等待执行
+                    self.timer.start(1000)
+                    return
+            
+                
+
 
     def cancelPlan(self):
         self.timer.stop()  # 停止定时器
+        self.plan_running_signal.emit({'end':True})  # 发送信号
 
         
     def update_row_state(self):
-        print(f"更新状态为执行完成")
-        self.table.item(self.running_row, 8).setText('执行完成')  # 更新状态为执行完成
+        if self.current_row > 0:
+            self.table.item(self.current_row-1, 8).setText(translations[self.language]['planned_shooting']['executed'])  # 更新状态为执行完成
+        else:
+            self.table.item(self.current_row, 8).setText(translations[self.language]['planned_shooting']['executed'])  # 更新状态为执行完成
+        if self.current_row >= self.table.rowCount():
+            self.current_row = 0
 

@@ -221,8 +221,6 @@ class AstrometrySolver(QThread):
             self.save_image = True
             self.save_image_path = value[0]
             self.save_image_name = value[1]
-            print(f"save_image_path: {self.save_image_path}")
-            print(f"save_image_name: {self.save_image_name}")
             return
         if not hasattr(self, 'params'):
             self.params = {}

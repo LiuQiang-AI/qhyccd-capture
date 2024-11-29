@@ -1,7 +1,11 @@
 from ctypes import *
 import ctypes
+from re import T
+from telnetlib import PRAGMA_HEARTBEAT
 import numpy as np
 import os
+import json
+from sympy import N
 from .language import translations
 import time
 import multiprocessing
@@ -13,6 +17,8 @@ from .control_id import CONTROL_ID
 from .previewThread import PreviewThread
 from .captureFrame import CaptureThread
 from .language import translations
+from .externalTriggerThread import ExternalTriggerThread
+
 
 class QHYCCDSDK(multiprocessing.Process):
     def __init__(self, input_queue, output_queue,language):
@@ -32,6 +38,8 @@ class QHYCCDSDK(multiprocessing.Process):
         self.shm1 = None
         self.shm2 = None
         self.is_running = True
+        self.external_trigger_thread = None
+        self.GPS_control = False
         self.init_command_map()
     
     def init_command_map(self):
@@ -83,6 +91,13 @@ class QHYCCDSDK(multiprocessing.Process):
             'cancel_capture': self.cancel_capture,                       # 取消捕获
             'get_image_buffer_size': self.get_image_buffer_size,         # 获取图像缓冲区大小
             'set_image_buffer': self.set_image_buffer,                   # 设置图像缓冲区
+            'set_external_trigger': self.set_external_trigger,           # 设置外部触发
+            'set_burst_mode': self.set_burst_mode,                       # 设置连拍模式
+            'start_burst_mode': self.start_burst_mode,                   # 开始连拍模式
+            'send_soft_trigger': self.send_soft_trigger,                   # 发送软触发
+            'stop_external_trigger': self.stop_external_trigger,           # 停止外部触发
+            'set_GPS_control': self.set_GPS_control,                       # 设置GPS控制
+            'get_humidity': self.get_humidity,                             # 获取湿度
         }
 
     def run(self):
@@ -103,7 +118,7 @@ class QHYCCDSDK(multiprocessing.Process):
                     self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['queue_size']} {self.input_queue.qsize()}"})
                 self.command_map[order](data['data'])
         except Exception as e:
-            self._report_error(f"{translations[self.language]['qhyccd_sdk']['process_error']}: {e}",sys._getframe().f_lineno)
+            self._report_error(f"{translations[self.language]['qhyccd_sdk']['process_error']}: order: {order}, error: {e}")
         finally:
             self.stop(None)
          
@@ -149,117 +164,147 @@ class QHYCCDSDK(multiprocessing.Process):
         else:
             self.qhyccddll = cdll.LoadLibrary(file_path)
 
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+
         # 获取机 ID
-        self.qhyccddll.GetQHYCCDId.argtypes = [ctypes.c_uint32, ctypes.c_char_p] # type: ignore
+        self.qhyccddll.GetQHYCCDId.argtypes = [ctypes.c_uint32, ctypes.c_char_p] 
 
         # 通过相机 ID 打开相机
-        self.qhyccddll.OpenQHYCCD.argtypes = [ctypes.c_char_p] # type: ignore
-        self.qhyccddll.OpenQHYCCD.restype = ctypes.c_void_p # type: ignore
+        self.qhyccddll.OpenQHYCCD.argtypes = [ctypes.c_char_p] 
+        self.qhyccddll.OpenQHYCCD.restype = ctypes.c_void_p 
 
         # 关闭相机
-        self.qhyccddll.CloseQHYCCD.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.CloseQHYCCD.argtypes = [ctypes.c_void_p] 
 
         # 读模式
-        self.qhyccddll.GetQHYCCDNumberOfReadModes.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)] # type: ignore
-        self.qhyccddll.GetQHYCCDReadModeName.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p] # type: ignore  
-        self.qhyccddll.GetQHYCCDReadModeResolution.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), # type: ignore
-                                                        ctypes.POINTER(ctypes.c_uint32)] # type: ignore
-        self.qhyccddll.SetQHYCCDReadMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] # type: ignore
+        self.qhyccddll.GetQHYCCDNumberOfReadModes.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)] 
+        self.qhyccddll.GetQHYCCDReadModeName.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p]   
+        self.qhyccddll.GetQHYCCDReadModeResolution.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), 
+                                                        ctypes.POINTER(ctypes.c_uint32)] 
+        self.qhyccddll.SetQHYCCDReadMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] 
 
         # 设置帧模式或实时流模式
-        self.qhyccddll.SetQHYCCDStreamMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] # type: ignore
+        self.qhyccddll.SetQHYCCDStreamMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] 
 
         # 初始化相机
-        self.qhyccddll.InitQHYCCD.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.InitQHYCCD.argtypes = [ctypes.c_void_p] 
 
         # 获取相机芯片信息
-        self.qhyccddll.GetQHYCCDChipInfo.argtypes = [ctypes.c_void_p,       # type: ignore
+        self.qhyccddll.GetQHYCCDChipInfo.argtypes = [ctypes.c_void_p,       
                                             ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
                                             ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),
                                             ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-                                            ctypes.POINTER(ctypes.c_uint32)] # type: ignore
+                                            ctypes.POINTER(ctypes.c_uint32)] 
 
         # 判断参数是否可用
-        self.qhyccddll.IsQHYCCDControlAvailable.argtypes = [ctypes.c_void_p, ctypes.c_uint32] # type: ignore
-        self.qhyccddll.IsQHYCCDControlAvailable.restype = ctypes.c_bool # type: ignore
+        self.qhyccddll.IsQHYCCDControlAvailable.argtypes = [ctypes.c_void_p, ctypes.c_uint32] 
+        self.qhyccddll.IsQHYCCDControlAvailable.restype = ctypes.c_bool 
 
         
         # 获参数值
-        self.qhyccddll.GetQHYCCDParam.argtypes = [ctypes.c_void_p, ctypes.c_uint32] # type: ignore
-        self.qhyccddll.GetQHYCCDParam.restype = ctypes.c_double # type: ignore
+        self.qhyccddll.GetQHYCCDParam.argtypes = [ctypes.c_void_p, ctypes.c_uint32] 
+        self.qhyccddll.GetQHYCCDParam.restype = ctypes.c_double 
 
         # 设置参数
-        self.qhyccddll.SetQHYCCDParam.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_double] # type: ignore
+        self.qhyccddll.SetQHYCCDParam.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_double] 
 
         # 获取参数值的范围
-        self.qhyccddll.GetQHYCCDParamMinMaxStep.argtypes = [ctypes.c_void_p, ctypes.c_uint32, # type: ignore
+        self.qhyccddll.GetQHYCCDParamMinMaxStep.argtypes = [ctypes.c_void_p, ctypes.c_uint32, 
                                                     ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),
-                                                    ctypes.POINTER(ctypes.c_double)] # type: ignore
-        self.qhyccddll.GetQHYCCDParamMinMaxStep.restype = ctypes.c_double # type: ignore
+                                                    ctypes.POINTER(ctypes.c_double)] 
+        self.qhyccddll.GetQHYCCDParamMinMaxStep.restype = ctypes.c_double 
 
         # 设置去马赛克（Debayer）开关，仅对彩色相机有效
-        self.qhyccddll.SetQHYCCDDebayerOnOff.argtypes = [ctypes.c_void_p, ctypes.c_bool] # type: ignore
+        self.qhyccddll.SetQHYCCDDebayerOnOff.argtypes = [ctypes.c_void_p, ctypes.c_bool] 
 
         # 设置 bin 模式
-        self.qhyccddll.SetQHYCCDBinMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] # type: ignore
+        self.qhyccddll.SetQHYCCDBinMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32] 
 
         # 设置分辨率和 ROI
-        self.qhyccddll.SetQHYCCDResolution.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, # type: ignore
+        self.qhyccddll.SetQHYCCDResolution.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, 
                                                 ctypes.c_uint32]
 
         # 启动单帧模式曝光
-        self.qhyccddll.ExpQHYCCDSingleFrame.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.ExpQHYCCDSingleFrame.argtypes = [ctypes.c_void_p] 
         
         # 获取已曝光时长
-        self.qhyccddll.GetQHYCCDExposureRemaining.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.GetQHYCCDExposureRemaining.argtypes = [ctypes.c_void_p] 
         # self.qhyccddll.GetQHYCCDExposureRemaining.restype = ctypes.c_double
         
         # 获取单帧数据
-        self.qhyccddll.GetQHYCCDSingleFrame.argtypes = [ctypes.c_void_p, # type: ignore
+        self.qhyccddll.GetQHYCCDSingleFrame.argtypes = [ctypes.c_void_p, 
                                                 ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),
                                                 ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),
                                                 ctypes.POINTER(ctypes.c_uint8)]
 
         # 取消单次曝光，相机将不输出帧数据
-        self.qhyccddll.CancelQHYCCDExposingAndReadout.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.CancelQHYCCDExposingAndReadout.argtypes = [ctypes.c_void_p] 
 
         # 启动实时流式
-        self.qhyccddll.BeginQHYCCDLive.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.BeginQHYCCDLive.argtypes = [ctypes.c_void_p] 
 
         # 获取实时帧数据
-        self.qhyccddll.GetQHYCCDLiveFrame.argtypes = [ctypes.c_void_p, # type: ignore
+        self.qhyccddll.GetQHYCCDLiveFrame.argtypes = [ctypes.c_void_p, 
                                                 ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),
                                                 ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),
-                                                ctypes.POINTER(ctypes.c_uint8)] # type: ignore
+                                                ctypes.POINTER(ctypes.c_uint8)] 
 
         # 停止实时流模式
-        self.qhyccddll.StopQHYCCDLive.argtypes = [ctypes.c_void_p] # type: ignore
+        self.qhyccddll.StopQHYCCDLive.argtypes = [ctypes.c_void_p] 
 
         # 转换图像数据（从16位转换为8位）
-        self.qhyccddll.Bits16ToBits8.argtypes = [ctypes.c_void_p, # type: ignore
+        self.qhyccddll.Bits16ToBits8.argtypes = [ctypes.c_void_p, 
                                             ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
                                             ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint16, ctypes.c_uint16]
         
         # 判断滤镜轮是否连接
-        self.qhyccddll.IsQHYCCDCFWPlugged.argtypes = [ctypes.c_void_p] # type: ignore
-        self.qhyccddll.IsQHYCCDCFWPlugged.restype = ctypes.c_bool # type: ignore
+        self.qhyccddll.IsQHYCCDCFWPlugged.argtypes = [ctypes.c_void_p] 
+        self.qhyccddll.IsQHYCCDCFWPlugged.restype = ctypes.c_bool 
         
         # EXPORTC uint32_t STDCALL SendOrder2QHYCCDCFW(qhyccd_handle *handle,char *order,uint32_t length);
         # 发送命令到滤镜轮
-        self.qhyccddll.SendOrder2QHYCCDCFW.argtypes = [ctypes.c_void_p,ctypes.c_char_p,ctypes.c_uint32] # type: ignore
+        self.qhyccddll.SendOrder2QHYCCDCFW.argtypes = [ctypes.c_void_p,ctypes.c_char_p,ctypes.c_uint32] 
 
         # 获取湿度
-        self.qhyccddll.GetQHYCCDHumidity.argtypes = [ctypes.c_void_p,ctypes.POINTER(ctypes.c_double)] # type: ignore
+        self.qhyccddll.GetQHYCCDHumidity.argtypes = [ctypes.c_void_p,ctypes.POINTER(ctypes.c_double)] 
 
         # 获取相机有效扫描范围
-        self.qhyccddll.GetQHYCCDEffectiveArea.argtypes = [ctypes.c_void_p,ctypes.POINTER(ctypes.c_uint32), # type: ignore
-                                                        ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), # type: ignore
-                                                        ctypes.POINTER(ctypes.c_uint32)] # type: ignore
+        self.qhyccddll.GetQHYCCDEffectiveArea.argtypes = [ctypes.c_void_p,ctypes.POINTER(ctypes.c_uint32), 
+                                                        ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), 
+                                                        ctypes.POINTER(ctypes.c_uint32)] 
         
         # 输出Debug
-        self.qhyccddll.OutputQHYCCDDebug.argtypes = [ctypes.c_char_p] # type: ignore
+        self.qhyccddll.OutputQHYCCDDebug.argtypes = [ctypes.c_char_p]
+        
+        
+        
+        # 启动连续曝光
+        self.qhyccddll.EnableQHYCCDBurstMode.argtypes = [ctypes.c_void_p,ctypes.c_bool]
+        self.qhyccddll.SetQHYCCDBurstModeStartEnd.argtypes = [ctypes.c_void_p,ctypes.c_uint32,ctypes.c_uint32]
+        self.qhyccddll.SetQHYCCDBurstModePatchNumber.argtypes = [ctypes.c_void_p,ctypes.c_uint32]
+        self.qhyccddll.SetQHYCCDBurstIDLE.argtypes = [ctypes.c_void_p]
+        self.qhyccddll.ReleaseQHYCCDBurstIDLE.argtypes = [ctypes.c_void_p]
+        
+        
+        # 设置外触发接口
+        self.qhyccddll.GetQHYCCDTrigerInterfaceNumber.argtypes = [ctypes.c_void_p,ctypes.POINTER(ctypes.c_uint32)]
+        self.qhyccddll.GetQHYCCDTrigerInterfaceName.argtypes = [ctypes.c_void_p,ctypes.c_uint32,ctypes.c_char_p]
+        self.qhyccddll.SetQHYCCDTrigerInterface.argtypes = [ctypes.c_void_p,ctypes.c_uint32]
+        self.qhyccddll.SetQHYCCDTrigerFunction.argtypes = [ctypes.c_void_p,ctypes.c_bool]
+        self.qhyccddll.EnableQHYCCDTrigerOut.argtypes = [ctypes.c_void_p]
+        self.qhyccddll.SetQHYCCDTrigerMode.argtypes = [ctypes.c_void_p,ctypes.c_uint32]
+        self.qhyccddll.EnableQHYCCDTrigerOutA.argtypes = [ctypes.c_void_p]
+        self.qhyccddll.SendSoftTriger2QHYCCDCam.argtypes = [ctypes.c_void_p]
+        self.qhyccddll.SetQHYCCDTrigerFilterOnOff.argtypes = [ctypes.c_void_p,ctypes.c_bool]
+        self.qhyccddll.SetQHYCCDTrigerFilterTime.argtypes = [ctypes.c_void_p,ctypes.c_uint32]
+        
+        self.qhyccddll.SendSoftTriger2QHYCCDCam.argtypes = [ctypes.c_void_p]
+        
+        
         # 初始化QHYCCD资源
-        ret = self.qhyccddll.InitQHYCCDResource() # type: ignore
+        ret = self.qhyccddll.InitQHYCCDResource() 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['init_failed'],sys._getframe().f_lineno)
         else:
@@ -268,14 +313,17 @@ class QHYCCDSDK(multiprocessing.Process):
                 self.output_queue.put({"order":"init_qhyccd_resource_success","data":file_path})
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['init_success']}:{file_path}"})
             
-    def releaseQHYCCDResource(self,data):
-        ret = self.qhyccddll.ReleaseQHYCCDResource() # type: ignore
+    def releaseQHYCCDResource(self,data,state=False):
+        if self.qhyccddll is None:
+            return
+        ret = self.qhyccddll.ReleaseQHYCCDResource() 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['release_resource_failed'],sys._getframe().f_lineno)
         else:
             self.qhyccddll = None
             self.output_queue.put({"order":"tip","data":translations[self.language]['qhyccd_sdk']['release_resource_success']})
-            self.output_queue.put({"order":"releaseResource_success","data":None})
+            if not state:
+                self.output_queue.put({"order":"releaseResource_success","data":None})
     
     def stop(self, data):
         try:
@@ -284,12 +332,19 @@ class QHYCCDSDK(multiprocessing.Process):
             if self.qhyccddll is not None:
                 self.releaseQHYCCDResource('')
                 self.qhyccddll = None
-            self.cleanup_shared_memory(self.shm1)
-            self.cleanup_shared_memory(self.shm2)
-            self.input_queue.close()
-            self.output_queue.close()
+            # self.cleanup_shared_memory(self.shm1)
+            # self.cleanup_shared_memory(self.shm2)
+            self.clear_buffer(self.input_queue)
+            self.clear_buffer(self.output_queue)
+            self.output_queue.put({"order":"stop_success","data":None})
+            # self.input_queue.close()
+            # self.output_queue.close()
         finally:
             self.is_running = False
+            
+    def clear_buffer(self,buffer):
+        while not buffer.empty():
+            buffer.get()
             
     def cleanup_shared_memory(self, shm):
         if shm is not None:
@@ -300,14 +355,17 @@ class QHYCCDSDK(multiprocessing.Process):
                 shm = None
 
     def read_camera_name(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         # 扫描QHYCCD相机
-        num = self.qhyccddll.ScanQHYCCD() # type: ignore
+        num = self.qhyccddll.ScanQHYCCD() 
         self.camera_ids = {}
         # 遍历所有扫描到的相机
         for index in range(num):
             # 获相机 ID
             id_buffer = ctypes.create_string_buffer(40)
-            ret = self.qhyccddll.GetQHYCCDId(index, id_buffer) # type: ignore
+            ret = self.qhyccddll.GetQHYCCDId(index, id_buffer) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['get_camera_id_failed'],sys._getframe().f_lineno)
             else:
@@ -316,34 +374,62 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"readCameraName_success","data":list(self.camera_ids.keys())})
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['scan_camera_success']}:{len(self.camera_ids)}"})
 
+    def read_location_info(self,file_path = "camera_info.json"):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+                return data
+        except FileNotFoundError:
+            return None
+        except json.JSONDecodeError:
+            return None
+    
+    def save_location_info(self,data,file_path = "camera_info.json"):
+        try:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                json.dump(data, file, ensure_ascii=False, indent=4)
+        except Exception as e:
+            self._report_error(f"保存位置信息失败: {e}", sys._getframe().f_lineno)
+
     def get_image_buffer_size(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        camera_info = {}
         max_buffer_size = 0
+        location_info = self.read_location_info()
         for camera_name in list(self.camera_ids.keys()):
+            if location_info is not None and camera_name in list(location_info.keys()):
+                if location_info[camera_name] is not None and max_buffer_size < location_info[camera_name]:
+                    max_buffer_size = location_info[camera_name]
+                if camera_name not in camera_info:
+                    camera_info[camera_name] = location_info[camera_name]
+                continue
             camera_id = self.camera_ids[camera_name]
-            camhandle = self.qhyccddll.OpenQHYCCD(camera_id) # type: ignore
+            camhandle = self.qhyccddll.OpenQHYCCD(camera_id) 
             if camhandle <= 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['open_camera_failed'],sys._getframe().f_lineno)
                 continue
             readModeNum = ctypes.c_uint32()
-            ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(camhandle,byref(readModeNum)) # type: ignore
+            ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(camhandle,byref(readModeNum)) 
             if ret < 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['get_read_mode_number_failed'],sys._getframe().f_lineno)
                 continue
             for index in range(readModeNum.value):
                 name_buffer = ctypes.create_string_buffer(40)
-                ret = self.qhyccddll.GetQHYCCDReadModeName(camhandle, index, name_buffer) # type: ignore
+                ret = self.qhyccddll.GetQHYCCDReadModeName(camhandle, index, name_buffer) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_name_failed'],sys._getframe().f_lineno)
                     continue
-                ret = self.qhyccddll.SetQHYCCDReadMode(camhandle, index) # type: ignore
+                ret = self.qhyccddll.SetQHYCCDReadMode(camhandle, index) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_readout_mode_failed'],sys._getframe().f_lineno)
                     continue
-                ret = self.qhyccddll.SetQHYCCDStreamMode(camhandle, 0) # type: ignore
+                ret = self.qhyccddll.SetQHYCCDStreamMode(camhandle, 0) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_stream_mode_failed'],sys._getframe().f_lineno)
                     continue
-                ret = self.qhyccddll.InitQHYCCD(camhandle) # type: ignore
+                ret = self.qhyccddll.InitQHYCCD(camhandle) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['init_camera_failed'],sys._getframe().f_lineno)
                     continue
@@ -354,16 +440,16 @@ class QHYCCDSDK(multiprocessing.Process):
                 pixelW = ctypes.c_double()  # 像素宽度
                 pixelH = ctypes.c_double()  # 像素高度
                 imageB = ctypes.c_uint32()  # 图像位深度
-                ret = self.qhyccddll.GetQHYCCDChipInfo(camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW), # type: ignore
-                                                byref(pixelH), byref(imageB)) # type: ignore
+                ret = self.qhyccddll.GetQHYCCDChipInfo(camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW), 
+                                                byref(pixelH), byref(imageB)) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['get_camera_config_failed'],sys._getframe().f_lineno)
                     continue
                 
                 is_color_camera = False
                 try:
-                    if not self.qhyccddll.IsQHYCCDControlAvailable(camhandle, CONTROL_ID.CAM_IS_COLOR.value): # type: ignore
-                        is_color_value = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CAM_IS_COLOR.value) # type: ignore
+                    if not self.qhyccddll.IsQHYCCDControlAvailable(camhandle, CONTROL_ID.CAM_IS_COLOR.value): 
+                        is_color_value = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CAM_IS_COLOR.value) 
                         if is_color_value == 4294967295.0:
                             self._report_error(translations[self.language]['qhyccd_sdk']['get_camera_is_color_failed'],sys._getframe().f_lineno)
                             is_color_camera = self.is_color_camera_by_name(camera_name)
@@ -382,25 +468,32 @@ class QHYCCDSDK(multiprocessing.Process):
                 if buffer_size > max_buffer_size:
                     max_buffer_size = buffer_size
                 if camhandle != self.camhandle:
-                    ret = self.qhyccddll.CloseQHYCCD(camhandle) # type: ignore
+                    ret = self.qhyccddll.CloseQHYCCD(camhandle) 
                     if ret != 0:
                         self._report_error(translations[self.language]['qhyccd_sdk']['close_camera_failed'],sys._getframe().f_lineno)
-    
-        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_image_buffer_size_success']}:{max_buffer_size}"})
+                if camera_name not in camera_info:
+                    camera_info[camera_name] = buffer_size
+                else:
+                    camera_info[camera_name] = max(camera_info[camera_name],buffer_size)
+                self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_image_buffer_size_success']}:{camera_name}({name_buffer.value.decode('utf-8')}):{buffer_size}"})
+        self.save_location_info(camera_info)
         self.output_queue.put({"order":"getImageBufferSize_success","data":max_buffer_size})
 
     def open_camera(self,camera_name):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         if camera_name not in self.camera_ids or camera_name == "":
             return
         camera_id = self.camera_ids[camera_name]
         self.camera_name = camera_name
-        ret = self.qhyccddll.OpenQHYCCD(camera_id) # type: ignore
+        ret = self.qhyccddll.OpenQHYCCD(camera_id) 
         if ret is None or ret <= 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['open_camera_failed'],sys._getframe().f_lineno)
         self.camhandle = ret
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['open_camera_success']}:{camera_name}"})
         readModeNum = ctypes.c_uint32()
-        ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(self.camhandle,byref(readModeNum)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(self.camhandle,byref(readModeNum)) 
         if ret < 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_read_mode_number_failed'],sys._getframe().f_lineno)
             return
@@ -408,7 +501,7 @@ class QHYCCDSDK(multiprocessing.Process):
         self.readout_mode_name_dict = {}
         for index in range(readModeNum.value):
             name_buffer = ctypes.create_string_buffer(40)
-            ret = self.qhyccddll.GetQHYCCDReadModeName(self.camhandle, index, name_buffer) # type: ignore
+            ret = self.qhyccddll.GetQHYCCDReadModeName(self.camhandle, index, name_buffer) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_name_failed'],sys._getframe().f_lineno)
                 return
@@ -417,12 +510,12 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_readout_mode_name_success']}"})
         
         self.stream_and_capture_mode_dict = {}
-        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_LIVEVIDEOMODE.value) # type: ignore
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_LIVEVIDEOMODE.value) 
         if ret != 0:    
             self._report_error(translations[self.language]['qhyccd_sdk']['camera_not_support_continuous_mode'],sys._getframe().f_lineno)
         else:
             self.stream_and_capture_mode_dict[f"{translations[self.language]['qhyccd_capture']['continuous_mode']}"] = 1
-        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_SINGLEFRAMEMODE.value) # type: ignore
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_SINGLEFRAMEMODE.value) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['camera_not_support_single_frame_mode'],sys._getframe().f_lineno)
         else:
@@ -431,8 +524,11 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"openCamera_success","data":{'id':self.camhandle,'readout_mode_name_dict':self.readout_mode_name_dict,'stream_and_capture_mode_dict':self.stream_and_capture_mode_dict}})
  
     def get_readout_mode(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         readModeNum = ctypes.c_uint32()
-        ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(self.camhandle,byref(readModeNum)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(self.camhandle,byref(readModeNum)) 
         if ret < 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_read_mode_number_failed'],sys._getframe().f_lineno)
             return
@@ -440,7 +536,7 @@ class QHYCCDSDK(multiprocessing.Process):
         self.readout_mode_name_dict = {}
         for index in range(readModeNum.value):
             name_buffer = ctypes.create_string_buffer(40)
-            ret = self.qhyccddll.GetQHYCCDReadModeName(self.camhandle, index, name_buffer) # type: ignore
+            ret = self.qhyccddll.GetQHYCCDReadModeName(self.camhandle, index, name_buffer) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_name_failed'],sys._getframe().f_lineno)
                 return
@@ -451,13 +547,16 @@ class QHYCCDSDK(multiprocessing.Process):
         return self.readout_mode_name_dict
         
     def get_stream_and_capture_mode(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.stream_and_capture_mode_dict = {}
-        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_LIVEVIDEOMODE.value) # type: ignore
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_LIVEVIDEOMODE.value) 
         if ret != 0:    
             self._report_error(translations[self.language]['qhyccd_sdk']['camera_not_support_continuous_mode'],sys._getframe().f_lineno)
         else:
             self.stream_and_capture_mode_dict[f"{translations[self.language]['qhyccd_capture']['continuous_mode']}"] = 1
-        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_SINGLEFRAMEMODE.value) # type: ignore
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_SINGLEFRAMEMODE.value) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['camera_not_support_single_frame_mode'],sys._getframe().f_lineno)
         else:
@@ -467,7 +566,13 @@ class QHYCCDSDK(multiprocessing.Process):
         return self.stream_and_capture_mode_dict
     
     def init_camera(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         camera_name,readout_mode,camera_mode = data
+        self.camera_name = camera_name
+        self.readout_mode = readout_mode
+        self.camera_mode = camera_mode
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['prepare_to_init_camera']}:{camera_name}..."})
         if self.camhandle > 0:
             self.close_camera(False)
@@ -477,28 +582,28 @@ class QHYCCDSDK(multiprocessing.Process):
         self.init_qhyccd_resource(self.qhyccd_resource_path,True)
         
         camera_id = self.camera_ids[camera_name]
-        ret = self.qhyccddll.OpenQHYCCD(camera_id) # type: ignore
+        ret = self.qhyccddll.OpenQHYCCD(camera_id) 
         if ret <= 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['open_camera_failed'],sys._getframe().f_lineno)
         self.camhandle = ret
         
         readout_id = self.readout_mode_name_dict[readout_mode]
-        ret = self.qhyccddll.SetQHYCCDReadMode(self.camhandle, readout_id) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDReadMode(self.camhandle, readout_id) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_readout_mode_failed'],sys._getframe().f_lineno)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_readout_mode_success']}:{readout_mode}"})
         readout_w = ctypes.c_uint32()
         readout_h = ctypes.c_uint32()
-        ret = self.qhyccddll.GetQHYCCDReadModeResolution(self.camhandle, readout_id, byref(readout_w), byref(readout_h)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDReadModeResolution(self.camhandle, readout_id, byref(readout_w), byref(readout_h)) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_resolution_failed'],sys._getframe().f_lineno)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_readout_mode_resolution_success']}:{readout_w.value}x{readout_h.value}"})
         stream_id = self.stream_and_capture_mode_dict[camera_mode]
-        ret = self.qhyccddll.SetQHYCCDStreamMode(self.camhandle, stream_id) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDStreamMode(self.camhandle, stream_id) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_stream_mode_failed'],sys._getframe().f_lineno)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_stream_mode_success']}:{camera_mode}"})
-        ret = self.qhyccddll.InitQHYCCD(self.camhandle) # type: ignore
+        ret = self.qhyccddll.InitQHYCCD(self.camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['init_camera_failed'],sys._getframe().f_lineno)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['init_camera_success']}"})
@@ -517,11 +622,17 @@ class QHYCCDSDK(multiprocessing.Process):
         camera_param['auto_white_balance'] = self.get_auto_white_balance_is_available('')
         camera_param['readout_w'] = readout_w.value
         camera_param['readout_h'] = readout_h.value
+        camera_param['external_trigger'] = self.get_external_trigger_status('')
+        camera_param['burst_mode'] = self.get_burst_mode_is_available('')
+        camera_param['GPS_control'] = self.get_GPS_control('')
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['init_camera_success']}:{camera_name}"})
         self.output_queue.put({"order":"initCamera_success","data":camera_param})
         
     def set_camera_depth(self, depth):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, depth)  # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, depth)  
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_camera_depth_failed'],sys._getframe().f_lineno)
         else:
@@ -529,13 +640,19 @@ class QHYCCDSDK(multiprocessing.Process):
             self.output_queue.put({"order": "setDepth_success", "data": depth})
     
     def get_debayer_mode(self,data):
-        self.debayer_mode = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) == 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.debayer_mode = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) == 0 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_debayer_mode_success']}:{self.debayer_mode}"})
         return self.debayer_mode
 
     def update_debayer_mode(self,debayer_mode):
-        if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) == 0: # type: ignore
-            ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, debayer_mode) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) == 0: 
+            ret = self.qhyccddll.SetQHYCCDDebayerOnOff(self.camhandle, debayer_mode) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_debayer_mode_failed'],sys._getframe().f_lineno)
             else:
@@ -543,11 +660,22 @@ class QHYCCDSDK(multiprocessing.Process):
                 self.output_queue.put({"order":"setDebayerMode_success","data":f"{translations[self.language]['qhyccd_sdk']['set_debayer_mode_success']}:{debayer_mode}"})
             
     def close_camera(self,state):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         if self.camhandle == 0:
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['camera_not_open']}"})
             self.output_queue.put({"order":"closeCamera_success","data":None})
             return
-        ret = self.qhyccddll.CloseQHYCCD(self.camhandle) # type: ignore
+        if self.external_trigger_thread is not None:
+            self.external_trigger_thread.stop()
+            self.external_trigger_thread = None
+        if self.preview_thread is not None:
+            self.preview_thread.handle_stop()
+            self.preview_thread = None
+        if self.GPS_control:
+            self.set_GPS_control(False)
+        ret = self.qhyccddll.CloseQHYCCD(self.camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['close_camera_failed'],sys._getframe().f_lineno)
         else:
@@ -556,10 +684,13 @@ class QHYCCDSDK(multiprocessing.Process):
             self.camhandle = 0
                 
     def get_is_color_camera(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.is_color_camera = False
         try:
-            if not self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value): # type: ignore
-                is_color_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) # type: ignore
+            if not self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value): 
+                is_color_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_IS_COLOR.value) 
                 if is_color_value == 4294967295.0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['get_camera_is_color_failed'],sys._getframe().f_lineno)
                     self.is_color_camera = self.is_color_camera_by_name(self.camera_name)
@@ -580,44 +711,50 @@ class QHYCCDSDK(multiprocessing.Process):
         return False
 
     def get_limit_data(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.limit_dict = {}
         # 设置曝光限制
-        exposure = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) # type: ignore
+        exposure = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) 
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_EXPOSURE.value)
         self.limit_dict["exposure"] = (min_data, max_data,step,exposure)
         # 设置增益
-        gain = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value) # type: ignore
+        gain = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value) 
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_GAIN.value)
         self.limit_dict["gain"] = (min_data, max_data,step,gain)
         # 设置偏移
-        offset = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value) # type: ignore
+        offset = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value) 
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_OFFSET.value)
         self.limit_dict["offset"] = (min_data, max_data,step,offset)
         # 设置USB宽带
-        usb_traffic = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value) # type: ignore
+        usb_traffic = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value) 
         min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_USBTRAFFIC.value)
         self.limit_dict["usb_traffic"] = (min_data, max_data,step,usb_traffic)
         # 设置白平衡限制
         if self.is_color_camera:
-            wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value) # type: ignore
+            wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBR.value)
             self.limit_dict["wb_red"] = (min_data, max_data,step,wb_red)
-            wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value) # type: ignore
+            wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBG.value)
             self.limit_dict["wb_green"] = (min_data, max_data,step,wb_green)        
-            wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value) # type: ignore
+            wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_WBB.value)
             self.limit_dict["wb_blue"] = (min_data, max_data,step,wb_blue)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_limit_data_success']}"})
         return self.limit_dict
         
     def get_effective_area(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         # 获取相机有效扫描范围
         startX = ctypes.c_uint32()
         startY = ctypes.c_uint32()
         sizeX = ctypes.c_uint32()
         sizeY = ctypes.c_uint32()
-        ret = self.qhyccddll.GetQHYCCDEffectiveArea(self.camhandle, byref(startX), byref(startY), byref(sizeX), byref(sizeY)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDEffectiveArea(self.camhandle, byref(startX), byref(startY), byref(sizeX), byref(sizeY)) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_effective_area_failed'],sys._getframe().f_lineno)
             return
@@ -632,6 +769,9 @@ class QHYCCDSDK(multiprocessing.Process):
         
     def get_camera_config(self,data):
         """更新相机配置显示"""
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         chipW = ctypes.c_double()  # 芯片宽度
         chipH = ctypes.c_double()  # 芯片高度
         imageW = ctypes.c_uint32()  # 图像宽度
@@ -640,8 +780,8 @@ class QHYCCDSDK(multiprocessing.Process):
         pixelH = ctypes.c_double()  # 像素高度
         imageB = ctypes.c_uint32()  # 图像位深度
 
-        ret = self.qhyccddll.GetQHYCCDChipInfo(self.camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW), # type: ignore
-                                        byref(pixelH), byref(imageB)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDChipInfo(self.camhandle, byref(chipW), byref(chipH), byref(imageW), byref(imageH), byref(pixelW), 
+                                        byref(pixelH), byref(imageB)) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_camera_config_failed'],sys._getframe().f_lineno)
             return
@@ -658,12 +798,15 @@ class QHYCCDSDK(multiprocessing.Process):
         return self.camera_config_dict
     
     def get_camera_pixel_bin(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.camera_pixel_bin_dict = {}
         for index, i in enumerate([CONTROL_ID.CAM_BIN1X1MODE.value, CONTROL_ID.CAM_BIN2X2MODE.value, CONTROL_ID.CAM_BIN3X3MODE.value, CONTROL_ID.CAM_BIN4X4MODE.value]):
-            if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, i) == 0: # type: ignore
+            if self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, i) == 0: 
                 self.camera_pixel_bin_dict[f"{index+1}*{index+1}"] = (index+1,index+1)
         
-        ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin_dict[list(self.camera_pixel_bin_dict.keys())[0]][0], self.camera_pixel_bin_dict[list(self.camera_pixel_bin_dict.keys())[0]][1]) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin_dict[list(self.camera_pixel_bin_dict.keys())[0]][0], self.camera_pixel_bin_dict[list(self.camera_pixel_bin_dict.keys())[0]][1]) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_camera_pixel_bin_failed'],sys._getframe().f_lineno)
         
@@ -671,40 +814,61 @@ class QHYCCDSDK(multiprocessing.Process):
         return self.camera_pixel_bin_dict
         
     def set_camera_pixel_bin(self,pixel_bin):
-        ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin_dict[pixel_bin][0], self.camera_pixel_bin_dict[pixel_bin][1]) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDBinMode(self.camhandle, self.camera_pixel_bin_dict[pixel_bin][0], self.camera_pixel_bin_dict[pixel_bin][1]) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_camera_pixel_bin_failed'],sys._getframe().f_lineno)
         else:
             self.output_queue.put({"order":"setCameraPixelBin_success","data":f"{translations[self.language]['qhyccd_sdk']['set_camera_pixel_bin_success']}:{pixel_bin}"})
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_camera_pixel_bin_success']}:{pixel_bin}"})
+           
+    def get_burst_mode_is_available(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_BURST_MODE.value)
+        if ret == 0:
+            return True
+        return False
             
     def update_resolution(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         startX,startY,sizeX,sizeY = data
-        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, startX, startY, sizeX, sizeY) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, startX, startY, sizeX, sizeY) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_resolution_failed'],sys._getframe().f_lineno)
         else:
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_resolution_success']}:{startX}*{startY}*{sizeX}*{sizeY}"})
   
     def getParamlimit(self,data_id,camhandle = None):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return None,None,None
         if camhandle is None:
             camhandle = self.camhandle
         minValue = ctypes.c_double()  # 最小值
         maxValue = ctypes.c_double()  # 最大值
         step = ctypes.c_double() # 步长
         
-        ret = self.qhyccddll.GetQHYCCDParamMinMaxStep(camhandle, data_id,byref(minValue),byref(maxValue),byref(step)) # type: ignore
+        ret = self.qhyccddll.GetQHYCCDParamMinMaxStep(camhandle, data_id,byref(minValue),byref(maxValue),byref(step)) 
         if ret == -1:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_param_limit_failed'],sys._getframe().f_lineno)
         return minValue.value,maxValue.value,step.value
 
     def get_camera_depth(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.camera_depth_options = {}
         minValue,maxValue,step=self.getParamlimit(CONTROL_ID.CONTROL_TRANSFERBIT.value)
         for i in range(int(minValue),int(maxValue+1),int(step)):
             self.camera_depth_options[f"{i}bit"] = i
         updated_items = list(self.camera_depth_options.keys())  # 获取新的选项列表
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, self.camera_depth_options[updated_items[0]]) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, self.camera_depth_options[updated_items[0]]) 
         if ret == -1:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_camera_depth_failed'],sys._getframe().f_lineno)
             return -1
@@ -712,22 +876,31 @@ class QHYCCDSDK(multiprocessing.Process):
         return self.camera_depth_options
 
     def stop_live(self,data):
-        ret = self.qhyccddll.StopQHYCCDLive(self.camhandle) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.StopQHYCCDLive(self.camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['stop_live_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['stop_live_success']}"})
 
     def start_live(self,data):
-        ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.BeginQHYCCDLive(self.camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['start_live_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['start_live_success']}"})
 
     def set_resolution(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         startX,startY,sizeX,sizeY = data
-        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, startX, startY, sizeX, sizeY) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDResolution(self.camhandle, startX, startY, sizeX, sizeY) 
         if ret == -1:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_resolution_failed'],sys._getframe().f_lineno)
             return -1
@@ -735,10 +908,13 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"setResolution_success","data":f"{startX}*{startY}*{sizeX}*{sizeY}"})
 
     def get_cfw_info(self,data):
-        self.is_CFW_control = self.qhyccddll.IsQHYCCDCFWPlugged(self.camhandle) == 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.is_CFW_control = self.qhyccddll.IsQHYCCDCFWPlugged(self.camhandle) == 0 
         self.CFW_number_ids = {}
         if self.is_CFW_control:
-            maxslot = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CFWSLOTSNUM.value) # type: ignore
+            maxslot = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CFWSLOTSNUM.value) 
             if maxslot > 0:
                 for i in range(int(maxslot)):
                     # 使用 hex() 函数将十进制数转换为十六进制字符串
@@ -750,6 +926,9 @@ class QHYCCDSDK(multiprocessing.Process):
         return (self.is_CFW_control,self.CFW_number_ids)
 
     def get_planned_shooting_data(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         self.planned_shooting_data = {}
         camera_name = self.camera_ids
         # 获取相机名称
@@ -758,14 +937,14 @@ class QHYCCDSDK(multiprocessing.Process):
             if i == self.camera_name:
                 camhandle = self.camhandle
             else:
-                camhandle = self.qhyccddll.OpenQHYCCD(camera_name[i]) # type: ignore
+                camhandle = self.qhyccddll.OpenQHYCCD(camera_name[i]) 
                 if camhandle <= 0:
                     continue
-            plan_data['ids'] = i
+            plan_data['ids'] = camhandle
             
             # 设置读出模式
             readModeNum = ctypes.c_uint32()
-            ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(camhandle,byref(readModeNum)) # type: ignore
+            ret = self.qhyccddll.GetQHYCCDNumberOfReadModes(camhandle,byref(readModeNum)) 
             if ret < 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_num_failed'],sys._getframe().f_lineno)
   
@@ -773,7 +952,7 @@ class QHYCCDSDK(multiprocessing.Process):
             readout_mode_name_dict = {}
             for index in range(readModeNum.value):
                 name_buffer = ctypes.create_string_buffer(40)
-                ret = self.qhyccddll.GetQHYCCDReadModeName(camhandle, index, name_buffer) # type: ignore
+                ret = self.qhyccddll.GetQHYCCDReadModeName(camhandle, index, name_buffer) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_name_failed'],sys._getframe().f_lineno)
                 result_name = name_buffer.value.decode("utf-8")
@@ -781,20 +960,20 @@ class QHYCCDSDK(multiprocessing.Process):
             plan_data['readout_mode'] = readout_mode_name_dict
             
             # 设置曝光限制
-            exposure = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) # type: ignore
+            exposure = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_EXPOSURE.value,camhandle)
             plan_data['exposure'] = [int(min_data),int(max_data),int(step),int(exposure)]
             # 设置增益
-            gain = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_GAIN.value) # type: ignore
+            gain = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_GAIN.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_GAIN.value,camhandle)
             plan_data['gain'] = [int(min_data),int(max_data),int(step),int(gain)]
             # 设置偏移
-            offset = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_OFFSET.value) # type: ignore
+            offset = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_OFFSET.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_OFFSET.value,camhandle)
             plan_data['offset'] =[int(min_data),int(max_data),int(step),int(offset)]
             
             # 设置位数
-            depth = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value) # type: ignore
+            depth = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value) 
             min_data, max_data, step = self.getParamlimit(CONTROL_ID.CONTROL_TRANSFERBIT.value,camhandle)
             depth_options = {}
             for j in range(int(min_data),int(max_data+1),int(step)):
@@ -802,10 +981,10 @@ class QHYCCDSDK(multiprocessing.Process):
             plan_data['depth'] = depth_options
             
             # 判断滤镜轮是否可用
-            is_CFW_control = self.qhyccddll.IsQHYCCDCFWPlugged(camhandle) == 0 # type: ignore
+            is_CFW_control = self.qhyccddll.IsQHYCCDCFWPlugged(camhandle) == 0 
             CFW_number_ids = {}
             if is_CFW_control:
-                maxslot = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWSLOTSNUM.value) # type: ignore
+                maxslot = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWSLOTSNUM.value) 
                 if maxslot > 0:
                     for j in range(int(maxslot)):
                         # 使用 hex() 函数将十进制数转换为十六进制字符串
@@ -814,7 +993,7 @@ class QHYCCDSDK(multiprocessing.Process):
                         hex_str = hex_str[2:]
                         CFW_number_ids[f"CFW:{j}"] = hex_str
             if i != self.camera_name:
-                ret = self.qhyccddll.CloseQHYCCD(camhandle) # type: ignore
+                ret = self.qhyccddll.CloseQHYCCD(camhandle) 
                 if ret<0:
                     continue
             plan_data['CFW'] = [is_CFW_control,CFW_number_ids]
@@ -828,75 +1007,146 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"getPlannedShootingData_success","data":self.planned_shooting_data})
 
     def run_plan(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        if len(data.keys()) == 1 and 'end' in data.keys():
+            camera_name = self.camera_name
+            readout_mode = self.readout_mode
+            camera_mode = self.camera_mode
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['prepare_to_init_camera']}:{camera_name}..."})
+            if self.camhandle > 0:
+                self.close_camera(False)
+            if self.qhyccddll is not None:
+                self.releaseQHYCCDResource('')
+                self.qhyccddll = None
+            self.init_qhyccd_resource(self.qhyccd_resource_path,True)
+            
+            camera_id = self.camera_ids[camera_name]
+            ret = self.qhyccddll.OpenQHYCCD(camera_id) 
+            if ret <= 0:
+                self._report_error(translations[self.language]['qhyccd_sdk']['open_camera_failed'],sys._getframe().f_lineno)
+            self.camhandle = ret
+            
+            readout_id = self.readout_mode_name_dict[readout_mode]
+            ret = self.qhyccddll.SetQHYCCDReadMode(self.camhandle, readout_id) 
+            if ret != 0:
+                self._report_error(translations[self.language]['qhyccd_sdk']['set_readout_mode_failed'],sys._getframe().f_lineno)
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_readout_mode_success']}:{readout_mode}"})
+            readout_w = ctypes.c_uint32()
+            readout_h = ctypes.c_uint32()
+            ret = self.qhyccddll.GetQHYCCDReadModeResolution(self.camhandle, readout_id, byref(readout_w), byref(readout_h)) 
+            if ret != 0:
+                self._report_error(translations[self.language]['qhyccd_sdk']['get_readout_mode_resolution_failed'],sys._getframe().f_lineno)
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_readout_mode_resolution_success']}:{readout_w.value}x{readout_h.value}"})
+            stream_id = self.stream_and_capture_mode_dict[camera_mode]
+            ret = self.qhyccddll.SetQHYCCDStreamMode(self.camhandle, stream_id) 
+            if ret != 0:
+                self._report_error(translations[self.language]['qhyccd_sdk']['set_stream_mode_failed'],sys._getframe().f_lineno)
+            ret = self.qhyccddll.InitQHYCCD(self.camhandle) 
+            if ret != 0:
+                self._report_error(translations[self.language]['qhyccd_sdk']['init_camera_failed'],sys._getframe().f_lineno)
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['init_camera_success']}"})
+           
+            camera_param = {}
+            # 判断相机是否是彩色相机
+            camera_param['is_color'] = self.get_is_color_camera('')
+            camera_param['config'] = self.get_camera_config('')
+            camera_param['limit'] = self.get_limit_data('')
+            camera_param['pixel_bin'] = self.get_camera_pixel_bin('')
+            camera_param['effective_area'] = self.get_effective_area('')
+            camera_param['depth'] = self.get_camera_depth('')
+            camera_param['debayer'] = self.get_debayer_mode('')
+            camera_param['temperature'] = self.get_is_temperature_control('')
+            camera_param['CFW'] = self.get_cfw_info('')
+            camera_param['auto_exposure'] = self.get_auto_exposure_is_available('')
+            camera_param['auto_white_balance'] = self.get_auto_white_balance_is_available('')
+            camera_param['readout_w'] = readout_w.value
+            camera_param['readout_h'] = readout_h.value
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['init_camera_success']}:{camera_name}"})
+            self.output_queue.put({"order":"initCamera_success","data":camera_param})
+            return
+        
         if data['name'] in self.camera_ids.keys():
-            if data['name'] == self.camera_name:
-                camhandle = self.camhandle
-            else:
-                camhandle = self.qhyccddll.OpenQHYCCD(self.camera_ids[data['name']]) # type: ignore
+            if self.camhandle != 0:
+                if self.preview_thread is not None:
+                    self.preview_thread.set_pause(True)
+                ret = self.qhyccddll.CloseQHYCCD(self.camhandle) 
+                self.camhandle = 0
+                if ret<0:
+                    self._report_error(translations[self.language]['qhyccd_sdk']['close_camera_failed'],sys._getframe().f_lineno)
+                    return
+            camhandle = self.qhyccddll.OpenQHYCCD(self.camera_ids[data['name']]) 
             if camhandle <= 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['open_camera_failed'],sys._getframe().f_lineno)
                 return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['open_camera']}{data['name']}"})
         # 设置读出模式
         readout_mode_index = data['readout_mode']
-        # 获取当前读出模式分辨率
-        image_w = ctypes.c_uint32()
-        image_h = ctypes.c_uint32()
-        ret = self.qhyccddll.GetQHYCCDReadModeResolution(camhandle, readout_mode_index,byref(image_w), byref(image_h)) # type: ignore
-        if ret != 0:
-            self._report_error(translations[self.language]['qhyccd_sdk']['get_resolution_failed'],sys._getframe().f_lineno)
-            return
-        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['get_resolution_success']}:{image_w.value}*{image_h.value}"})
-        # 设置读出模式
-        ret = self.qhyccddll.SetQHYCCDReadMode(camhandle, readout_mode_index) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDReadMode(camhandle, readout_mode_index) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_readout_mode_failed'],sys._getframe().f_lineno)
             return
-        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_readout_mode_success']}"})
+        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_readout_mode_success']}:{readout_mode_index}"})
         # 设置单帧模式
-        ret = self.qhyccddll.SetQHYCCDStreamMode(camhandle, 0) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDStreamMode(camhandle, 0) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_stream_mode_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_stream_mode_success']}"})
         # 初始化相机
-        ret = self.qhyccddll.InitQHYCCD(camhandle) # type: ignore
+        ret = self.qhyccddll.InitQHYCCD(camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['init_camera_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['init_camera_success']}"})
+        # 获取当前读出模式分辨率
+        image_w = ctypes.c_uint32()
+        image_h = ctypes.c_uint32()
+        ret = self.qhyccddll.GetQHYCCDReadModeResolution(camhandle, readout_mode_index,byref(image_w), byref(image_h)) 
+        if ret != 0:
+            self._report_error(translations[self.language]['qhyccd_sdk']['get_resolution_failed'],sys._getframe().f_lineno)
+            return
+        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['get_resolution_success']}:{image_w.value}*{image_h.value}"})
+        # 设置分辨率
+        ret = self.qhyccddll.SetQHYCCDResolution(camhandle, 0, 0, image_w.value, image_h.value) 
+        if ret != 0:
+            self._report_error(translations[self.language]['qhyccd_sdk']['set_resolution_failed'],sys._getframe().f_lineno)
+            return
+        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_resolution_success']}:{image_w.value}*{image_h.value}"})
         # 设置曝光    
-        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_EXPOSURE.value, data['exposure']) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_EXPOSURE.value, data['exposure']) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_exposure_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_exposure_success']}:{data['exposure']}us"})
         # 设置增益
-        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_GAIN.value, data['gain']) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_GAIN.value, data['gain']) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_gain_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_gain_success']}:{data['gain']}"})
         # 设置偏移
-        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_OFFSET.value, data['offset']) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_OFFSET.value, data['offset']) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_offset_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_offset_success']}:{data['offset']}"})
         # 设置位数
-        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, data['depth']) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_TRANSFERBIT.value, data['depth']) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_depth_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_depth_success']}:{data['depth']}"})
+        order = 'None'
         if data['CFW'] != 'None':
             order = ord(data['CFW'])
-            ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWPORT.value, order) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWPORT.value, order) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_CFW_failed'],sys._getframe().f_lineno)
                 return
             while True:
-                is_exposing_done = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWPORT.value) # type: ignore
+                is_exposing_done = self.qhyccddll.GetQHYCCDParam(camhandle, CONTROL_ID.CONTROL_CFWPORT.value) 
                 if is_exposing_done == order:
                     break
                 else:
@@ -904,7 +1154,7 @@ class QHYCCDSDK(multiprocessing.Process):
                     time.sleep(0.1)
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['set_CFW_success']}:{order}"})
         # 开始曝光
-        ret = self.qhyccddll.ExpQHYCCDSingleFrame(camhandle) # type: ignore
+        ret = self.qhyccddll.ExpQHYCCDSingleFrame(camhandle) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['exposure_failed'],sys._getframe().f_lineno)
             return  # 如果启动失败，直接返回避免进一步阻塞
@@ -914,69 +1164,78 @@ class QHYCCDSDK(multiprocessing.Process):
         image_c = 1
         image_b = data['depth']
         length = image_w * image_h * image_c * (image_b // 8)
+        # 获取单帧图像数据
         w = ctypes.c_uint32()
         h = ctypes.c_uint32()
         b = ctypes.c_uint32()
         c = ctypes.c_uint32()
-  
-        if data['depth'] == 16:
-            imgdata = (ctypes.c_uint16 * length)()
-            imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte))
-        else:
-            imgdata = (ctypes.c_uint8 * length)()
-            imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte))
+        length = int(image_h * image_w * image_c * (image_b // 8))
 
-        ret = self.qhyccddll.GetQHYCCDSingleFrame(camhandle, byref(w), byref(h), byref(b), byref(c), imgdata) # type: ignore
+        imgdata = (ctypes.c_ubyte * length)()
+      
+        ret = self.qhyccddll.GetQHYCCDSingleFrame(camhandle, byref(w), byref(h), byref(b), byref(c), imgdata) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['get_single_frame_failed'],sys._getframe().f_lineno)
             return  # 如果获取失败，直接返回避免进一步阻塞
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['get_single_frame_success']}"})
-        imgdata = ctypes.cast(imgdata, ctypes.POINTER(ctypes.c_ubyte * length)).contents
 
-        if c.value == 1:
-            if data['depth'] == 16:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint16).reshape((h.value, w.value))
-            else:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint8).reshape((h.value, w.value))
-        elif c.value == 3:
-            if data['depth'] == 16:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint16).reshape((h.value, w.value, c.value))
-            else:
-                imgdata_np = np.frombuffer(imgdata, dtype=np.uint8).reshape((h.value, w.value, c.value))
-        else:
-            raise ValueError("Unsupported number of channels")
+        img_size = w.value * h.value * c.value * (b.value // 8)
+            
+        # 将临时缓冲区转换为 numpy 数组
+        img = np.ctypeslib.as_array(imgdata, shape=(img_size,))
+        
+        # 根据通道数处理图像
+        if c.value == 3:  # 彩色图像
+            img = img.reshape((h.value, w.value, c.value))
+            img = img[:, :, ::-1]  # 将 BGR 转换为 RGB
+        else:  # 灰度或其他格式
+            img = img.reshape((h.value, w.value)) if b.value != 16 else img.view(np.uint16).reshape((h.value, w.value))
 
-        if data['name'] != self.camera_name:
-            ret = self.qhyccddll.CloseQHYCCD(camhandle) # type: ignore
-            if ret<0:
-                self._report_error(translations[self.language]['qhyccd_sdk']['close_camera_failed'],sys._getframe().f_lineno)
-                return
+        ret = self.qhyccddll.CloseQHYCCD(camhandle) 
+        if ret<0:
+            self._report_error(translations[self.language]['qhyccd_sdk']['close_camera_failed'],sys._getframe().f_lineno)
+            return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['run_plan_success']}{translations[self.language]['qhyccd_sdk']['close_camera_success']}:{data['name']}"})
-        self.output_queue.put({"order":"runPlan_success","data":imgdata_np})
+        self.output_queue.put({"order":"runPlan_success","data":img})
         
     def get_is_temperature_control(self,data):
-        self.has_temperature_control = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value) != 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.has_temperature_control = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value) != 0 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_is_temperature_control_success']}: {self.has_temperature_control}"})
         return self.has_temperature_control
     
     def get_temperature(self,data):
-        current_temp = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        current_temp = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CURTEMP.value) 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_temperature_success']}: {current_temp}"})
         self.output_queue.put({"order":"getTemperature_success","data":current_temp})
         
     def set_temperature(self,data):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_COOLER.value, data) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_COOLER.value, data) 
         if ret != 0:
             self._report_error(translations[self.language]['qhyccd_sdk']['set_temperature_failed'],sys._getframe().f_lineno)
             return
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_temperature_success']}: {data}"})
         
     def get_auto_exposure_is_available(self,data):
-        self.auto_exposure_is_available = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) == 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.auto_exposure_is_available = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) == 0 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_auto_exposure_is_available_success']}: {self.auto_exposure_is_available}"})
         return self.auto_exposure_is_available
 
     def get_auto_exposure_limits(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         exposure_mode_dict = {}
         all_exposure_mode_dict = {translations[self.language]['auto_exposure']['mode_off']:0,  # 关闭自动曝光
             translations[self.language]['auto_exposure']['mode_gain_only']:1,  # 仅调节gain模式
@@ -994,58 +1253,61 @@ class QHYCCDSDK(multiprocessing.Process):
         exposure_mode_dict['mode'] = all_exposure_mode_dict
         # 获取增益限制
         min, max, step = self.getParamlimit(CONTROL_ID.CONTROL_AUTOEXPgainMax.value)
-        gain_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value) # type: ignore
+        gain_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value) 
         exposure_mode_dict['gain'] = [min, max, step,gain_data]
         # 获取曝光时间限制
         min, max, step = self.getParamlimit(CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value)
-        exposure_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value) # type: ignore
+        exposure_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value) 
         exposure_mode_dict['exposure'] = [min, max, step,exposure_data]
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_auto_exposure_limits_success']}: {exposure_mode_dict}"})
         self.output_queue.put({"order":"getAutoExposureLimits_success","data":exposure_mode_dict})
     
     def set_auto_exposure(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         mode, gain, exposure = data
         if mode == 0:
-            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != mode: # type: ignore
-                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, mode) # type: ignore
+            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != mode: 
+                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, mode) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_auto_exposure_failed'],sys._getframe().f_lineno)
                     return
         elif mode == 1:
-            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 1: # type: ignore
-                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 1.0) # type: ignore
+            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 1: 
+                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 1.0) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_auto_exposure_failed'],sys._getframe().f_lineno)
                     return
             gain_max = int(gain)
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_gain_failed'],sys._getframe().f_lineno)
                 return
         elif mode == 2:
-            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 2: # type: ignore
-                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 2.0) # type: ignore
+            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 2: 
+                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 2.0) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_auto_exposure_failed'],sys._getframe().f_lineno)
                     return
             exposure_time = int(exposure)
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_exposure_failed'],sys._getframe().f_lineno)
                 return
         elif mode == 3:
-            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 3: # type: ignore
-                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 3.0) # type: ignore
+            if self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value) != 3: 
+                ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPOSURE.value, 3.0) 
                 if ret != 0:
                     self._report_error(translations[self.language]['qhyccd_sdk']['set_auto_exposure_failed'],sys._getframe().f_lineno)
                     return
             gain_max = int(gain)
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPgainMax.value, gain_max) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_gain_failed'],sys._getframe().f_lineno)
                 return
             exposure_time = int(exposure)
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOEXPexpMaxMS.value, exposure_time) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_exposure_failed'],sys._getframe().f_lineno)
                 return
@@ -1055,19 +1317,29 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"setAutoExposure_success","data":mode})
     
     def get_exposure_value(self,data):
-        exposure_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        exposure_value = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value) 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_exposure_value_success']}: {exposure_value}"})
         self.output_queue.put({"order":"getExposureValue_success","data":exposure_value})
         
     def get_auto_white_balance_is_available(self,data):
-        self.auto_white_balance_is_available = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.auto_white_balance_is_available = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0 
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_auto_white_balance_is_available_success']}: {self.auto_white_balance_is_available}"})
-        self.output_queue.put({"order":"getAutoWhiteBalanceIsAvailable_success","data":self.auto_white_balance_is_available})
+        # self.output_queue.put({"order":"getAutoWhiteBalanceIsAvailable_success","data":self.auto_white_balance_is_available})
+        return self.auto_white_balance_is_available
         
     def set_auto_white_balance(self,data):
-        auto_white_balance_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        auto_white_balance_data = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) 
         if auto_white_balance_data != data:
-            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value, data) # type: ignore
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value, data) 
             if ret != 0:
                 self._report_error(translations[self.language]['qhyccd_sdk']['set_auto_white_balance_failed'],sys._getframe().f_lineno)
                 return
@@ -1075,14 +1347,20 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"setAutoWhiteBalance_success","data":data})
 
     def get_auto_white_balance_values(self,data):
-        wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value) # type: ignore
-        wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value) # type: ignore
-        wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value) # type: ignore
-        auto_white_balance_is_running = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0 # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        wb_red = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value) 
+        wb_green = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value) 
+        wb_blue = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value) 
+        auto_white_balance_is_running = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_AUTOWHITEBALANCE.value) == 0 
         self.output_queue.put({"order":"autoWhiteBalanceComplete","data":(wb_red, wb_green, wb_blue,auto_white_balance_is_running)})
        
     def set_exposure_time(self,data):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value, data) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_EXPOSURE.value, data) 
         if ret == 0:
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_exposure_time_success']}: {data}"})
             self.output_queue.put({"order":"setExposureTime_success","data":data})
@@ -1091,7 +1369,10 @@ class QHYCCDSDK(multiprocessing.Process):
             return
         
     def set_gain(self,data):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value, data) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_GAIN.value, data) 
         if ret == 0:
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_gain_success']}: {data}"})
             self.output_queue.put({"order":"setGain_success","data":data})
@@ -1100,7 +1381,10 @@ class QHYCCDSDK(multiprocessing.Process):
             return
     
     def set_offset(self,data):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value, data) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_OFFSET.value, data) 
         if ret == 0:    
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_offset_success']}: {data}"})
             self.output_queue.put({"order":"setOffset_success","data":data})
@@ -1109,7 +1393,10 @@ class QHYCCDSDK(multiprocessing.Process):
             return
 
     def set_usb_traffic(self,data):
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value, data) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return  
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_USBTRAFFIC.value, data) 
         if ret == 0:
             self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_usb_traffic_success']}: {data}"})
             self.output_queue.put({"order":"setUsbTraffic_success","data":data})
@@ -1118,16 +1405,19 @@ class QHYCCDSDK(multiprocessing.Process):
             return
             
     def set_white_balance(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         red, green, blue = data
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value, red) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBR.value, red) 
         if ret != 0:        
             self._report_error(f"{translations[self.language]['debug']['set_qhyccd_red_gain_failed']}: {ret}",sys._getframe().f_lineno)
             red = -1
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value, green) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBG.value, green) 
         if ret != 0:
             self._report_error(f"{translations[self.language]['debug']['set_qhyccd_green_gain_failed']}: {ret}",sys._getframe().f_lineno)
             green = -1
-        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value, blue) # type: ignore
+        ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_WBB.value, blue) 
         if ret != 0:
             self._report_error(f"{translations[self.language]['debug']['set_qhyccd_blue_gain_failed']}: {ret}",sys._getframe().f_lineno)
             blue = -1
@@ -1140,12 +1430,15 @@ class QHYCCDSDK(multiprocessing.Process):
         thread.start()
 
     def _set_CFW_filter_thread(self, data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
         CFW_id = data
         order = self.CFW_number_ids[CFW_id].encode('utf-8')
-        ret = self.qhyccddll.SendOrder2QHYCCDCFW(self.camhandle, c_char_p(order), len(order))  # type: ignore
+        ret = self.qhyccddll.SendOrder2QHYCCDCFW(self.camhandle, c_char_p(order), len(order))  
         if ret == 0:
             while True:
-                is_moving_done = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CFWPORT.value)  # type: ignore
+                is_moving_done = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CONTROL_CFWPORT.value)  
                 if is_moving_done == ord(order):
                     break
                 else:
@@ -1157,7 +1450,7 @@ class QHYCCDSDK(multiprocessing.Process):
     
     def start_preview(self, data):
         w, h, c, depth, exposure_time, gain, offset, debayer_mode = data
-        self.preview_thread = PreviewThread(self.camhandle, self.qhyccddll, w, h, c, depth, self.shm1, self.shm2, self.output_queue,self.language)
+        self.preview_thread = PreviewThread(self.camhandle, self.qhyccddll, w, h, c, depth, self.shm1_name, self.shm2_name, self.output_queue,self.language)
         self.preview_thread.handle_start()
         
     def stop_preview(self,data):
@@ -1179,18 +1472,124 @@ class QHYCCDSDK(multiprocessing.Process):
             
     def single_capture(self,data):
         image_w, image_h, image_c, camera_bit = data
-        self.capture_thread = CaptureThread(self.camhandle, self.qhyccddll, image_w, image_h, image_c, camera_bit, self.output_queue, self.language)
+        self.capture_thread = CaptureThread(self.camhandle, self.qhyccddll, image_w, image_h, image_c, camera_bit, self.GPS_control,self.output_queue, self.language)
         self.capture_thread.start()
         
     def get_single_capture_status(self,data):
-        elapsed_time = self.qhyccddll.GetQHYCCDExposureRemaining(self.camhandle) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        elapsed_time = self.qhyccddll.GetQHYCCDExposureRemaining(self.camhandle) 
         if elapsed_time == -1:
             elapsed_time = 0
         self.output_queue.put({"order":"singleCapture_status","data":elapsed_time})
         
     def cancel_capture(self,data):
-        self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle) # type: ignore
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.qhyccddll.CancelQHYCCDExposingAndReadout(self.camhandle) 
         
     def set_image_buffer(self,data):
-        self.shm1 = shared_memory.SharedMemory(name=data['shm1'])
-        self.shm2 = shared_memory.SharedMemory(name=data['shm2'])
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.shm1_name = data['shm1']
+        self.shm2_name = data['shm2']
+        
+    def set_external_trigger(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        trigger_interface, use_trigger_output, image_data = data
+        trigger_interface_id = self.trigger_interface_names[trigger_interface]
+        if self.external_trigger_thread is None:
+            self.preview_thread.set_pause(True)
+            self.external_trigger_thread = ExternalTriggerThread(self.camhandle, self.qhyccddll,self.output_queue,trigger_interface_id,use_trigger_output,image_data,self.language)
+            self.external_trigger_thread.start()
+
+    def stop_external_trigger(self,data):
+        if self.external_trigger_thread is not None:
+            self.external_trigger_thread.stop()
+            self.external_trigger_thread = None
+            if self.preview_thread is not None:
+                self.preview_thread.set_pause(False)
+            self.output_queue.put({"order":"stopExternalTrigger_success","data":''})
+            
+    def get_external_trigger_status(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        self.external_trigger_is_enabled = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_TRIGER_INTERFACE.value) == 0 
+        self.trigger_interface_names = {}
+        if self.external_trigger_is_enabled:
+            num = ctypes.c_uint32()
+            ret = self.qhyccddll.GetQHYCCDTrigerInterfaceNumber(self.camhandle, byref(num))
+            if ret == 0:
+                self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_external_trigger_number_success']}: {num.value}"})
+            else:
+                self._report_error(translations[self.language]['qhyccd_sdk']['get_external_trigger_number_failed'],sys._getframe().f_lineno)
+                return
+            for i in range(num.value):
+                name = ctypes.create_string_buffer(40)
+                ret = self.qhyccddll.GetQHYCCDTrigerInterfaceName(self.camhandle, i, name)
+                if ret != 0:
+                    self._report_error(translations[self.language]['qhyccd_sdk']['get_external_trigger_name_failed'],sys._getframe().f_lineno)
+                    return
+                self.trigger_interface_names[name.value.decode('utf-8')] = i
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_external_trigger_name_success']}: {self.trigger_interface_names}"})
+        return (self.external_trigger_is_enabled, self.trigger_interface_names)
+     
+    def set_burst_mode(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        if self.preview_thread is not None:
+            self.preview_thread.set_burst_mode(data)
+    
+    def start_burst_mode(self,data):
+        if self.preview_thread is not None:
+            self.preview_thread.start_burst_mode(data)
+            
+    def send_soft_trigger(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+
+    def set_GPS_control(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        if self.preview_thread is not None:
+            self.preview_thread.set_pause(True)
+        if data == 0:
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_GPS.value, 1) 
+        else:
+            ret = self.qhyccddll.SetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_GPS.value, 0) 
+             
+        if ret == 0:
+            self.GPS_control = data
+            self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['set_GPS_control_success']}: {data}"})
+            self.output_queue.put({"order":"setGPSControl_success","data":data})
+            if self.preview_thread is not None:
+                self.preview_thread.update_GPS_control(data)
+                self.preview_thread.set_pause(False)
+        else:
+            self._report_error(translations[self.language]['qhyccd_sdk']['set_GPS_control_failed'],sys._getframe().f_lineno)
+            return
+        
+    def get_GPS_control(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_GPS.value)
+        if ret == 0:
+            return True
+        else:
+            return False
+
+    def get_humidity(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        
