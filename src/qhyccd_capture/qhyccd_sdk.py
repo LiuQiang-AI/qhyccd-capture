@@ -97,7 +97,7 @@ class QHYCCDSDK(multiprocessing.Process):
             'send_soft_trigger': self.send_soft_trigger,                   # 发送软触发
             'stop_external_trigger': self.stop_external_trigger,           # 停止外部触发
             'set_GPS_control': self.set_GPS_control,                       # 设置GPS控制
-            'get_humidity': self.get_humidity,                             # 获取湿度
+            'get_humidity_data': self.get_humidity_data,                 # 获取湿度
         }
 
     def run(self):
@@ -617,6 +617,7 @@ class QHYCCDSDK(multiprocessing.Process):
         camera_param['depth'] = self.get_camera_depth('')
         camera_param['debayer'] = self.get_debayer_mode('')
         camera_param['temperature'] = self.get_is_temperature_control('')
+        camera_param['humidity'] = self.get_humidity_is_available('')
         camera_param['CFW'] = self.get_cfw_info('')
         camera_param['auto_exposure'] = self.get_auto_exposure_is_available('')
         camera_param['auto_white_balance'] = self.get_auto_white_balance_is_available('')
@@ -1058,6 +1059,7 @@ class QHYCCDSDK(multiprocessing.Process):
             camera_param['depth'] = self.get_camera_depth('')
             camera_param['debayer'] = self.get_debayer_mode('')
             camera_param['temperature'] = self.get_is_temperature_control('')
+            camera_param['humidity'] = self.get_humidity_is_available('')
             camera_param['CFW'] = self.get_cfw_info('')
             camera_param['auto_exposure'] = self.get_auto_exposure_is_available('')
             camera_param['auto_white_balance'] = self.get_auto_white_balance_is_available('')
@@ -1588,8 +1590,20 @@ class QHYCCDSDK(multiprocessing.Process):
         else:
             return False
 
-    def get_humidity(self,data):
+    def get_humidity_is_available(self,data):
         if self.qhyccddll is None:
             self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
             return
+        ret = self.qhyccddll.IsQHYCCDControlAvailable(self.camhandle, CONTROL_ID.CAM_HUMIDITY.value)
+        return ret == 0
+
+    def get_humidity_data(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        humidity = self.qhyccddll.GetQHYCCDParam(self.camhandle, CONTROL_ID.CAM_HUMIDITY.value)
+        if humidity == -1:
+            humidity = 0
+        self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_humidity_success']}: {humidity}"})
+        self.output_queue.put({"order":"getHumidity_success","data":humidity})
         

@@ -1,6 +1,7 @@
 MANIFEST.in
 README.md
 README_CN.md
+camera_info.json
 luts.pkl
 pyproject.toml
 requirements.txt
@@ -36,10 +37,12 @@ src/qhyccd_capture.egg-info/dependency_links.txt
 src/qhyccd_capture.egg-info/entry_points.txt
 src/qhyccd_capture.egg-info/requires.txt
 src/qhyccd_capture.egg-info/top_level.txt
+src/qhyccd_capture/icon/GPS_icon.png
 src/qhyccd_capture/icon/camera_icon.png
 src/qhyccd_capture/icon/film_icon.png
 src/qhyccd_capture/icon/instagram_icon.png
 src/qhyccd_capture/icon/thermometer_icon.png
 src/qhyccd_capture/icon/toggle_right_icon.png
+src/qhyccd_capture/icon/trigger_icon.png
 src/qhyccd_capture/icon/video_icon.png
 src/qhyccd_capture/images/image.png

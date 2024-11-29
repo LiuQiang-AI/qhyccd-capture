@@ -1066,6 +1066,8 @@ class CameraControlWidget(QWidget):
             self.stop_external_trigger_success(data['data'])    
         if data['order'] == 'setGPSControl_success':
             self.on_GPS_control_success(data['data'])
+        if data['order'] == 'get_humidity_success':
+            self.update_camera_humidity_text(data['data'])
            
     def init_qhyccdResource(self,file_path=None):
         if self.sdk_input_queue is None:
@@ -1172,6 +1174,7 @@ class CameraControlWidget(QWidget):
             self.update_depth_selector_success(data['depth'])
             self.update_camera_mode()
             self.update_camera_temperature_success(data['temperature'])
+            self.update_camera_humidity_success(data['humidity'])
             self.update_CFW_control_success(data['CFW'])
             self.update_auto_exposure_success(data['auto_exposure'])
             self.update_auto_white_balance_success(data['auto_white_balance'])
@@ -1209,7 +1212,7 @@ class CameraControlWidget(QWidget):
             self.connect_button.setEnabled(True)
             self.reset_camera_button.setEnabled(True)
             self.disconnect_button.setEnabled(False)
-            self.append_text(f"{translations[self.language]['debug']['already_connected_signal_failed']}: {e}")
+            self.append_text(f"{translations[self.language]['debug']['already_connected_signal_failed']}: {e}",True)
 
     def disconnect_camera(self):
         """断开相机连接"""
@@ -1274,6 +1277,7 @@ class CameraControlWidget(QWidget):
         self.camera_state = False
         
         self.temperature_update_timer.stop()
+        self.humidity_update_timer.stop()
     
         self.planned_shooting_dialog.clearTable()
         self.settings_dialog.camera_info_label.setText(f'{translations[self.language]["qhyccd_capture"]["camera_info_disconnected"]}')
@@ -1599,7 +1603,20 @@ class CameraControlWidget(QWidget):
             self.temperature_control_box.setVisible(False)
             self.show_temperature_control_checkbox.hide()
             self.temperature_update_timer.stop()
-        # self.append_text(f'{translations[self.language]["qhyccd_capture"]["update_temperature_control"]}')
+            
+    def update_camera_humidity(self):
+        if self.sdk_input_queue is None:
+            return
+        self.sdk_input_queue.put({'order':'get_is_humidity_control', 'data':''})
+        
+    def update_camera_humidity_success(self,has_humidity_control):
+        self.has_humidity_control = has_humidity_control
+        if self.has_humidity_control:
+            self.humidity_update_timer.start(5000)  # 每5秒更新一次湿度
+            self.current_humidity_label.setVisible(True)
+        else:
+            self.humidity_update_timer.stop()
+            self.current_humidity_label.setVisible(False)
     
     def update_CFW_control(self):
         self.sdk_input_queue.put({'order':'get_cfw_info', 'data':''})
@@ -2468,8 +2485,12 @@ class CameraControlWidget(QWidget):
     def update_current_humidity(self):
         """更新当前湿度显示"""
         if self.sdk_input_queue is not None:
-            self.sdk_input_queue.put({"order":"get_humidity",'data':''})
-                
+            self.sdk_input_queue.put({"order":"get_humidity_data",'data':''})
+          
+    def update_camera_humidity_text(self,data):
+        if self.has_humidity_control:
+            self.current_humidity_label.setText(f'{translations[self.language]["qhyccd_capture"]["humidity"]}: {data:.2f} %')
+        
     def on_CFW_filter_changed(self, index):
         if self.sdk_input_queue is None:
             return

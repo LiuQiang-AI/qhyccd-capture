@@ -80,8 +80,8 @@ translations = {
             'blue': 'Blue:',
             'temperature_control': 'Temperature Control',
             'set_temperature': 'Set Temperature:',
-            'temperature': 'Temperature: Unknown',
-            'humidity': 'Humidity: Unknown',
+            'temperature': 'Temperature',
+            'humidity': 'Humidity',
             'CFW_control': 'CFW Control',
             'CFW_position': 'CFW',
             'init_complete': 'Initialization Complete',
@@ -440,6 +440,8 @@ translations = {
             'get_external_trigger_name_failed': 'Get External Trigger Name Failed',
             'set_GPS_control_success': 'Set GPS Control Success',
             'set_GPS_control_failed': 'Set GPS Control Failed',
+            'get_humidity_success': 'Get Humidity Success',
+            'get_humidity_failed': 'Get Humidity Failed',
         },
         'preview_thread': {
             'set_pause_success': 'Set Preview Pause Success',
@@ -504,8 +506,7 @@ translations = {
             'executing': 'Executing',
             'executed': 'Executed',
             'waiting': 'Waiting',
-        },
-        
+        },        
         'debug': {
             'init_failed': 'Initialization Failed',
             'not_found_sdk': 'SDK file not found',
@@ -1004,6 +1005,9 @@ translations = {
             'get_external_trigger_name_failed': '获取外部触发器名称失败',
             'set_GPS_control_success': '设置GPS控制成功',
             'set_GPS_control_failed': '设置GPS控制失败',
+            'get_humidity_success': '获取湿度成功',
+            'get_humidity_failed': '获取湿度失败',
+            
         },
         'preview_thread': {
             'set_pause_success': '设置预览暂停成功',
