@@ -1,15 +1,11 @@
 from ctypes import *
 import ctypes
-from re import T
-from telnetlib import PRAGMA_HEARTBEAT
 import numpy as np
 import os
 import json
-from sympy import N
 from .language import translations
 import time
 import multiprocessing
-from multiprocessing import shared_memory
 import sys
 import threading
 
