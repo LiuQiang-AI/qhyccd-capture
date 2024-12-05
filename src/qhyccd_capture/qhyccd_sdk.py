@@ -18,6 +18,7 @@ from .previewThread import PreviewThread
 from .captureFrame import CaptureThread
 from .language import translations
 from .externalTriggerThread import ExternalTriggerThread
+from .save_video import SaveThread
 
 
 class QHYCCDSDK(multiprocessing.Process):
@@ -98,6 +99,8 @@ class QHYCCDSDK(multiprocessing.Process):
             'stop_external_trigger': self.stop_external_trigger,           # 停止外部触发
             'set_GPS_control': self.set_GPS_control,                       # 设置GPS控制
             'get_humidity_data': self.get_humidity_data,                 # 获取湿度
+            'start_save_video': self.start_save_video,                   # 保存视频
+            'stop_save_video': self.stop_save_video,                       # 停止保存视频
         }
 
     def run(self):
@@ -1607,3 +1610,14 @@ class QHYCCDSDK(multiprocessing.Process):
         self.output_queue.put({"order":"tip","data":f"{translations[self.language]['qhyccd_sdk']['get_humidity_success']}: {humidity}"})
         self.output_queue.put({"order":"getHumidity_success","data":humidity})
         
+        
+    def start_save_video(self,data):
+        if self.qhyccddll is None:
+            self._report_error(translations[self.language]['qhyccd_sdk']['not_found_sdk'],sys._getframe().f_lineno)
+            return
+        if self.preview_thread is not None:
+            self.preview_thread.start_save_video(data)
+            
+    def stop_save_video(self,data):
+        if self.preview_thread is not None:
+            self.preview_thread.stop_save_video()

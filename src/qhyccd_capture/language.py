@@ -458,7 +458,10 @@ translations = {
             'release_burst_mode_idle_success': 'Release Burst Mode Idle Success',
             'release_burst_mode_idle_failed': 'Release Burst Mode Idle Failed',
             'capture_frame_failed': 'Capture Frame Failed',
-            
+            'record_time_mode_success': 'Time Mode Recording Success',
+            'record_frame_mode_success': 'Frame Mode Recording Success',
+            'start_save_video_success': 'Start Save Video Success',
+            'stop_save_video_success': 'Stop Save Video Success',
         },
         'externalTriggerThread': {
             'exp_qhyccd_single_frame_failed': 'Exp QHYCCD Single Frame Failed',
@@ -507,6 +510,9 @@ translations = {
             'executed': 'Executed',
             'waiting': 'Waiting',
         },        
+        'save_image': {
+            'save_image_failed': 'Save Image Failed',
+        },
         'debug': {
             'init_failed': 'Initialization Failed',
             'not_found_sdk': 'SDK file not found',
@@ -1024,6 +1030,10 @@ translations = {
             'release_burst_mode_idle_success': '释放连拍模式空闲成功',
             'release_burst_mode_idle_failed': '释放连拍模式空闲失败',
             'capture_frame_failed': '捕获帧失败',
+            'record_time_mode_success': '时间模式录制成功',
+            'record_frame_mode_success': '帧数模式录制成功',
+            'start_save_video_success': '开始录制视频',
+            'stop_save_video_success': '停止录制视频',
         },
         'externalTriggerThread': {
             'exp_qhyccd_single_frame_failed': '单帧曝光失败',
@@ -1071,6 +1081,9 @@ translations = {
             'executing': '正在执行',
             'executed': '执行完成',
             'waiting': '等待执行',
+        },
+        'save_image': {
+            'save_image_failed': '图像保存失败',
         },
         'debug': {
             'init_failed': '初始化失败',

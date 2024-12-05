@@ -38,6 +38,7 @@ dependencies = [
     "photutils>=1.11.0,<1.14.0",
     "pybind11",
     "pyqtgraph",
+    "sympy",
 ]
 
 [project.optional-dependencies]

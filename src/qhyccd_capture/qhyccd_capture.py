@@ -20,6 +20,7 @@ import multiprocessing
 from multiprocessing import shared_memory
 from datetime import datetime, timedelta
 import pytz
+from websocket import continuous_frame
 
 # Import custom modules
 from .save_video import SaveThread
@@ -129,8 +130,8 @@ class CameraControlWidget(QWidget):
         self.camhandle = 0
         self.init_camera_id = -1
         
-        # 初始化图像队列
-        self.buffer_queue = queue.Queue()  # 用于保存图像数据的队列
+        # # 初始化图像队列
+        # self.buffer_queue = queue.Queue()  # 用于保存图像数据的队列
 
         # 初始化时间
         self.last_update_time = None
@@ -982,92 +983,98 @@ class CameraControlWidget(QWidget):
     def on_sdk_data_received(self, data):
         if data['order'] == 'init_qhyccd_resource_success':
             self.init_qhyccdResource_success(data['data'])
-        if data['order'] == 'readCameraName_success':
+        elif data['order'] == 'readCameraName_success':
             self.read_camera_name_success(data['data'])
-        if data['order'] == 'getPlannedShootingData_success':
+        elif data['order'] == 'getPlannedShootingData_success':
             self.update_planned_shooting_data(data['data'])
-        if data['order'] == 'openCamera_success':
+        elif data['order'] == 'openCamera_success':
             self.open_camera_success(data['data'])
-        if data['order'] == 'readoutModeName_success':
+        elif data['order'] == 'readoutModeName_success':
             self.get_readout_mode_success(data['data'])
-        if data['order'] == 'streamAndCaptureMode_success':
+        elif data['order'] == 'streamAndCaptureMode_success':
             self.get_stream_and_capture_mode_success(data['data'])
-        if data['order'] == 'initCamera_success':
+        elif data['order'] == 'initCamera_success':
             self.already_connected_signal(data['data'])
-        if data['order'] == 'closeCamera_success':
+        elif data['order'] == 'closeCamera_success':
             self.already_disconnected_signal()
-        if data['order'] == 'getIsColorCamera_success':
+        elif data['order'] == 'getIsColorCamera_success':
             self.update_camera_color_success(data['data'])
-        if data['order'] == 'getLimitSelector_success':
+        elif data['order'] == 'getLimitSelector_success':
             self.update_limit_selector_success(data['data'])
-        if data['order'] == 'getEffectiveArea_success':
+        elif data['order'] == 'getEffectiveArea_success':
             self.get_effective_area_success(data['data'])
-        if data['order'] == 'getCameraConfig_success':
+        elif data['order'] == 'getCameraConfig_success':
             self.update_camera_config_success(data['data'])
-        if data['order'] == 'getCameraPixelBin_success':
+        elif data['order'] == 'getCameraPixelBin_success':
             self.update_camera_pixel_bin_success(data['data'])
-        if data['order'] == 'setCameraPixelBin_success':
+        elif data['order'] == 'setCameraPixelBin_success':
             self.on_set_pixel_bin_success()
-        if data['order'] == 'getCameraDepth_success':
+        elif data['order'] == 'getCameraDepth_success':
             self.update_depth_selector_success(data['data'])
-        if data['order'] == 'setDebayerMode_success':
+        elif data['order'] == 'setDebayerMode_success':
             self.append_text(data['data'])
-        if data['order'] == 'getIsTemperatureControl_success':
+        elif data['order'] == 'getIsTemperatureControl_success':
             self.update_camera_temperature_success(data['data'])
-        if data['order'] == 'getCFWInfo_success':
+        elif data['order'] == 'getCFWInfo_success':
             self.update_CFW_control_success(data['data'])
-        if data['order'] == 'getAutoExposureIsAvailable_success':
+        elif data['order'] == 'getAutoExposureIsAvailable_success':
             self.update_auto_exposure_success(data['data'])
-        if data['order'] == 'getAutoExposureLimits_success':
+        elif data['order'] == 'getAutoExposureLimits_success':
             self.auto_exposure_dialog.update_limits_success(data['data'])   # type: ignore
-        if data['order'] == 'setAutoExposure_success':
+        elif data['order'] == 'setAutoExposure_success':
             self.auto_exposure_dialog.apply_changes_success(data['data'])   # type: ignore
-        if data['order'] == 'getExposureValue_success':
+        elif data['order'] == 'getExposureValue_success':
             self.on_auto_exposure_value_changed(data['data'])   # type: ignore
-        if data['order'] == 'getAutoWhiteBalanceIsAvailable_success':
+        elif data['order'] == 'getAutoWhiteBalanceIsAvailable_success':
             self.update_auto_white_balance_success(data['data'])
-        if data['order'] == 'setAutoWhiteBalance_success':
+        elif data['order'] == 'setAutoWhiteBalance_success':
             self.auto_white_balance_dialog.start_auto_white_balance_success(data)   # type: ignore
-        if data['order'] == 'getAutoWhiteBalanceValues_success':
+        elif data['order'] == 'getAutoWhiteBalanceValues_success':
             self.on_auto_white_balance_complete(data['data'])   # type: ignore
-        if data['order'] == 'setExposureTime_success':
+        elif data['order'] == 'setExposureTime_success':
             self.update_exposure_time_success(data['data'])
-        if data['order'] == 'setUsbTraffic_success':
+        elif data['order'] == 'setUsbTraffic_success':
             self.update_usb_traffic_success(data['data'])
-        if data['order'] == 'error':
+        elif data['order'] == 'error':
             self.append_text(data['data'], is_error=True)
-        if data['order'] == 'start_preview_success':
+        elif data['order'] == 'start_preview_success':
             self.start_preview_success(data['data'])
-        if data['order'] == 'preview_frame':
+        elif data['order'] == 'preview_frame':
             self.data_received(data['data'])
-        if data['order'] == 'tip':
+        elif data['order'] == 'tip':
             self.append_text(data['data'])
-        if data['order'] == 'singleCapture_success':
+        elif data['order'] == 'singleCapture_success':
             self.on_capture_finished(data['data'])
-        if data['order'] == 'setDepth_success':
+        elif data['order'] == 'setDepth_success':
             self.on_set_depth_success(data['data'])
-        if data['order'] == 'stop_preview_success':
+        elif data['order'] == 'stop_preview_success':
             self.stop_preview_success()
-        if data['order'] == 'setResolution_success':
+        elif data['order'] == 'setResolution_success':
             self.on_set_resolution_success()
-        if data['order'] == 'getImageBufferSize_success':
+        elif data['order'] == 'getImageBufferSize_success':
             self.update_image_buffer_size_success(data['data'])
-        if data['order'] == 'getTemperature_success':
+        elif data['order'] == 'getTemperature_success':
             self.get_temperature_success(data['data'])
-        if data['order'] == 'stop_success':
+        elif data['order'] == 'stop_success':
             self.stop_qhyccd_process_success()
-        if data['order'] == 'runPlan_success':
+        elif data['order'] == 'runPlan_success':
             self.on_plan_success(data['data'])
-        if data['order'] == 'setCFWFilter_success':
+        elif data['order'] == 'setCFWFilter_success':
             self.on_set_CFW_filter_success(data['data'])
-        if data['order'] == 'burst_mode_frame':
+        elif data['order'] == 'burst_mode_frame':
             self.on_burst_mode_frame(data['data'])
-        if data['order'] == 'stopExternalTrigger_success':
+        elif data['order'] == 'stopExternalTrigger_success':
             self.stop_external_trigger_success(data['data'])    
-        if data['order'] == 'setGPSControl_success':
+        elif data['order'] == 'setGPSControl_success':
             self.on_GPS_control_success(data['data'])
-        if data['order'] == 'get_humidity_success':
+        elif data['order'] == 'get_humidity_success':
             self.update_camera_humidity_text(data['data'])
+        elif data['order'] == 'record_end':
+            self.stop_recording_success(data['data'])
+        elif data['order'] == 'save_end':
+            self.on_save_thread_finished()
+        elif data['order'] == 'progress_bar_value':
+            self.progress_bar.setValue(data['data'])
            
     def init_qhyccdResource(self,file_path=None):
         if self.sdk_input_queue is None:
@@ -2562,14 +2569,77 @@ class CameraControlWidget(QWidget):
         self.save_progress_indicator.setVisible(True)
         self.save_progress_indicator.setText(translations[self.language]["qhyccd_capture"]["saving"])
         
+        record_time_mode = False
+        record_frame_mode = False
+        continuous_mode = False
+        record_time = 0
+        total_frames = 0
+        
+        # 传输数据到保存
+        if self.is_recording:
+            if self.file_format == "fits":
+                if (self.is_color_camera and self.Debayer_mode) or self.bayer_conversion != "None":
+                    self.image_c = 3
+                else:
+                    self.image_c = 1
+                dict_value = {
+                    "SIMPLE": "T",
+                    "BITPIX": self.camera_bit,
+                    "NAXIS": self.image_c,
+                    "NAXIS1": self.image_w,
+                    "NAXIS2": self.image_h,
+                    "DATE-OBS": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                    "EXPTIME": f"{self.exposure_time.value():.3f} ms",
+                    "TELESCOP": self.camera_name,     
+                }
+                self.fits_header_dialog.update_table_with_dict(dict_value)
+    
+            self.record_time_input.setEnabled(False)
+            self.frame_count_input.setEnabled(False)
+            self.record_mode_selector.setEnabled(False)
+            # 重置进度条
+            self.progress_bar.setValue(0)
+            self.progress_bar.setTextVisible(True)
+            self.progress_bar.setStyleSheet("")  # 还原颜色
+            
+            if self.record_mode == translations[self.language]["qhyccd_capture"]["time_mode"]:
+                record_time_mode = True
+                record_time = self.record_time_input.value()
+                self.progress_bar.setRange(0, 100)
+            elif self.record_mode == translations[self.language]["qhyccd_capture"]["frame_mode"]:
+                total_frames = self.frame_count_input.value()  # 获取总帧数
+                record_frame_mode = True
+                self.progress_bar.setRange(0, 100)
+            elif self.record_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
+                continuous_mode = True
+                self.progress_bar.setRange(0, 0)
+        
+            self.sdk_input_queue.put({"order":"start_save_video",'data':{
+                "record_time_mode":record_time_mode,
+                "record_frame_mode":record_frame_mode,
+                "continuous_mode":continuous_mode,
+                "record_time":record_time,
+                "total_frames":total_frames,
+                "path":self.path_selector.text(),
+                "file_name":self.record_file_name.text(),
+                "save_format":self.save_format_selector.currentText(),
+                "save_mode":self.save_mode,
+                "jpeg_quality":self.jpeg_quality.value(),
+                "tiff_compression":self.tiff_compression.currentText(),
+                "fits_header":self.fits_header_dialog.get_table_data()
+            }})
+        
     def on_save_thread_finished(self):
         self.save_progress_indicator.setText(translations[self.language]["qhyccd_capture"]["save_completed"])
         self.append_text(translations[self.language]["qhyccd_capture"]["recording_completed"])
 
     def stop_recording(self):
+        if self.sdk_input_queue is not None:
+            self.sdk_input_queue.put({"order":"stop_save_video",'data':''})
+        
+    def stop_recording_success(self,data):
         self.is_recording = False
         self.record_button.setEnabled(True)
-        self.buffer_queue.put("end")
         self.save_thread = None
         self.record_time_input.setEnabled(True)
         self.frame_count_input.setEnabled(True)
@@ -2641,86 +2711,6 @@ class CameraControlWidget(QWidget):
         if imgdata_np is None:
             return
         self.update_GPS_data(gps_data)
-        
-        # 传输数据到保存
-        if self.is_recording:
-            if self.file_format == "fits":
-                dict_value = {
-                    "SIMPLE": "T",
-                    "BITPIX": imgdata_np.dtype.name,
-                    "NAXIS": imgdata_np.ndim,
-                    "NAXIS1": self.image_w,
-                    "NAXIS2": self.image_h,
-                    "DATE-OBS": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-                    "EXPTIME": f"{self.exposure_time.value():.3f} ms",
-                    "TELESCOP": self.camera_name,     
-                }
-                self.fits_header_dialog.update_table_with_dict(dict_value)
-    
-            # 应用 Bayer 转换
-            if self.is_color_camera and self.bayer_conversion != "None":
-                imgdata_np = self.convert_bayer(imgdata_np, self.bayer_conversion)
-            if self.save_thread is None:
-                self.buffer_queue = queue.Queue()
-                # 创建并启动保存线程
-                self.save_thread = SaveThread(self.buffer_queue, self.path_selector.text(), self.record_file_name.text(), self.save_format_selector.currentText(), self.save_mode, int(fps),self.language,int(self.jpeg_quality.value()),int(self.tiff_compression_dict[self.tiff_compression.currentText()]),self.fits_header_dialog.get_table_data())
-                self.save_thread.finished.connect(self.on_save_thread_finished)  # 连接信号
-                self.save_thread.start()
-                self.record_time_input.setEnabled(False)
-                self.frame_count_input.setEnabled(False)
-                self.record_mode_selector.setEnabled(False)
-                
-                # 重置进度条
-                self.progress_bar.setValue(0)
-                self.progress_bar.setTextVisible(True)
-                self.progress_bar.setStyleSheet("")  # 还原颜色
-
-            if self.record_mode == translations[self.language]["qhyccd_capture"]["time_mode"]:
-                if self.start_save_time is None:
-                    self.record_time_input.setEnabled(False)
-                    self.record_mode_selector.setEnabled(False)
-                    self.start_save_time = time.time()
-                
-                elapsed_time = time.time() - self.start_save_time
-                total_time = self.record_time_input.value()  # 获取总时间
-                if total_time > 0:
-                    progress = min((elapsed_time / total_time) * 100, 100)  # 计算进度
-                    self.progress_bar.setValue(int(progress))
-
-                self.buffer_queue.put(imgdata_np)
-                if elapsed_time > total_time:
-                    self.buffer_queue.put("end")
-                    self.start_save_time = None
-                    self.save_thread = None
-                    self.stop_recording()
-                    self.record_button.setEnabled(True)
-                    self.record_time_input.setEnabled(True)
-                    self.frame_count_input.setEnabled(True)
-                    self.record_mode_selector.setEnabled(True)
-                    self.progress_bar.setValue(0)  # 重置进度条
-                    
-            elif self.record_mode == translations[self.language]["qhyccd_capture"]["frame_mode"]:
-                self.buffer_queue.put(imgdata_np)
-                self.record_frame_count += 1
-                total_frames = self.frame_count_input.value()  # 获取总帧数
-                if total_frames > 0:
-                    progress = min((self.record_frame_count / total_frames) * 100, 100)  # 计算进度
-                    self.progress_bar.setValue(int(progress))
-
-                if self.record_frame_count >= total_frames:
-                    self.buffer_queue.put("end")
-                    self.record_frame_count = 0
-                    self.save_thread = None
-                    self.stop_recording()
-                    self.record_button.setEnabled(True)
-                    self.record_time_input.setEnabled(True)
-                    self.frame_count_input.setEnabled(True)
-                    self.record_mode_selector.setEnabled(True)
-                    self.progress_bar.setValue(0)  # 重置进度条
-            elif self.record_mode == translations[self.language]["qhyccd_capture"]["continuous_mode"]:
-                self.buffer_queue.put(imgdata_np)
-                # 进度条循环
-                self.progress_bar.setRange(0, 0)
                 
         # 获取当前时间
         current_time = time.time()

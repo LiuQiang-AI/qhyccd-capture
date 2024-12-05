@@ -8,14 +8,14 @@ import numpy as np
 from .language import translations
 
 class SaveThread(QThread):
-    finished = pyqtSignal()  # 定义一个信号
 
-    def __init__(self, buffer_queue, file_path, file_name, file_format, save_mode, fps,language,jpeg_quality = 100,tiff_compression = 0,fits_header = None,num_threads=4):
+    def __init__(self, output_buffer, buffer_queue, file_path, file_name, file_format, save_mode, fps,language,jpeg_quality = 100,tiff_compression = 0,fits_header = None,num_threads=4):
         super().__init__()
         self.language = language
         self.jpeg_quality = jpeg_quality
         self.tiff_compression = tiff_compression
         self.buffer_queue = buffer_queue
+        self.output_buffer = output_buffer
         self.file_path = file_path
         self.file_format = file_format
         self.fits_header = fits_header
@@ -99,10 +99,8 @@ class SaveThread(QThread):
                 self.buffer_queue.task_done()
 
             video_writer.release()  # 释放视频写入对象
-            # print(f"视频已保存到: {video_path}")
 
-        # 结束时发出信号
-        self.finished.emit()  # 发出信号
+        self.output_buffer.put({"order":"save_end","data":''})
 
     def save_image(self, imgdata_np, file_path, file_format='png'):
         """保存图像的方法"""
@@ -141,7 +139,8 @@ class SaveThread(QThread):
                 try:
                     hdu.writeto(file_path, overwrite=True)
                 except Exception as e:
-                    print(f"{translations[self.language]['qhyccd_capture']['debug']['save_image_failed']}: {e}")
+                    error_msg = translations[self.language]["save_image"]["save_image_failed"]
+                    print(f"{error_msg}: {e}")
             else:
                 # 保存为常见格式（PNG, JPEG, TIFF）
                 if file_format.lower() == 'png':
@@ -154,7 +153,8 @@ class SaveThread(QThread):
                 else:
                     return
         except Exception as e:
-            print(f"{translations[self.language]['qhyccd_capture']['debug']['save_image_failed']}: {e}")
+            self.output_buffer.put({"order":"error","data":translations[self.language]['save_image']['save_image_failed']})
+
 
     def convert_to_number(self, value):
         """尝试将字符串转换为整数或浮点数"""

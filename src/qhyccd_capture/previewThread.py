@@ -3,12 +3,14 @@ import threading  # 导入 threading 模块
 import numpy as np
 import ctypes
 from ctypes import *
+import queue
 import time
 from multiprocessing import Array
 from threading import Lock
 import warnings
 from .sharedMemoryManager import SharedMemoryManager
 from .language import translations
+from .save_video import SaveThread
 
 class PreviewThread(threading.Thread):  
     def __init__(self, camhandle, qhyccddll, image_w,image_h, image_c, image_b,shm1_name,shm2_name,output_buffer, language='en'):
@@ -31,6 +33,18 @@ class PreviewThread(threading.Thread):
         self.paused = False  # 新增一个属性来控制是否暂停
         self.burst_mode_state = False
         self.GPS_control = False
+        self.save_thread = None
+        self.buffer_queue = None
+        self.save_thread_running = False
+        self.fps = 0
+        self.record_time_mode = False
+        self.record_frame_mode = False
+        self.continuous_mode = False
+        self.record_time = 0
+        self.total_frames = 0
+        self.record_start_time = 0
+        self.record_frame_count = 0
+        self.progress_bar_value = 0
         
     def run(self):
         while self.running:
@@ -42,16 +56,37 @@ class PreviewThread(threading.Thread):
                         if len(self.frame_times) > 300:
                             self.frame_times.pop(0)
                         if len(self.frame_times) > 1:
-                            fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0] + 0.0001)
+                            self.fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0] + 0.0001)
                         else:
-                            fps = 0.0001
+                            self.fps = 0.0001
                         
-                        self.frame_captured = fps
+                        if self.save_thread is not None and self.save_thread_running and self.buffer_queue is not None:
+                            self.buffer_queue.put(img)
+                            if self.record_time_mode:
+                                if self.record_start_time == 0:
+                                    self.record_start_time = time.time()
+                                if time.time() - self.record_start_time >= self.record_time:
+                                    self.stop_save_video()
+                                    self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['record_time_mode_success']})
+                                    self.output_buffer.put({"order":"record_end","data":''})
+                                else:
+                                    self.progress_bar_value = int((time.time() - self.record_start_time) / self.record_time * 100)
+                                    self.output_buffer.put({"order":"progress_bar_value","data":self.progress_bar_value})
+                            elif self.record_frame_mode:
+                                self.record_frame_count += 1
+                                if self.record_frame_count >= self.total_frames:
+                                    self.stop_save_video()
+                                    self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['record_frame_mode_success']})
+                                    self.output_buffer.put({"order":"record_end","data":''})
+                                else:
+                                    self.progress_bar_value = int(self.record_frame_count / self.total_frames * 100)
+                                    self.output_buffer.put({"order":"progress_bar_value","data":self.progress_bar_value})
+                        self.frame_captured = self.fps
                         with SharedMemoryManager(name=self.shm1_name) as shm1, SharedMemoryManager(name=self.shm2_name) as shm2:
                             shm = shm1 if self.shm_status else shm2
                             with self.lock:
                                 shm.buf[:self.image_size] = img.tobytes()
-                        self.output_buffer.put({"order":"preview_frame","data":{"fps":fps,"shm_status":self.shm_status,"image_size":self.image_size,"shape":(self.image_h,self.image_w,self.image_c,self.image_b),"gps_data":gps_data}})
+                        self.output_buffer.put({"order":"preview_frame","data":{"fps":self.fps,"shm_status":self.shm_status,"image_size":self.image_size,"shape":(self.image_h,self.image_w,self.image_c,self.image_b),"gps_data":gps_data}})
                         self.shm_status = not self.shm_status
                     else:
                         with SharedMemoryManager(name=self.shm1_name) as shm1, SharedMemoryManager(name=self.shm2_name) as shm2:
@@ -213,3 +248,36 @@ class PreviewThread(threading.Thread):
                 self.output_buffer.put({"order":"error","data":f"{translations[self.language]['preview_thread']['set_burst_mode_failed']}: {state}"})
                 return
             self.output_buffer.put({"order":"tip","data":f"{translations[self.language]['preview_thread']['set_burst_mode_success']}: {state}"})
+
+    def start_save_video(self,data):
+        self.record_time_mode = data['record_time_mode']
+        self.record_frame_mode = data['record_frame_mode']
+        self.continuous_mode = data['continuous_mode']
+        self.record_time = data['record_time']
+        self.total_frames = data['total_frames']
+        self.buffer_queue = queue.Queue()
+        self.save_thread = SaveThread(self.output_buffer,self.buffer_queue, data['path'], data['file_name'], data['save_format'], data['save_mode'], self.fps,self.language,data['jpeg_quality'],data['tiff_compression'],data['fits_header'])
+        self.save_thread_running = True
+        self.save_thread.start()
+        self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['start_save_video_success']})
+        
+    def stop_save_video(self):
+        if self.save_thread is not None:
+            self.save_thread_running = False
+            if self.buffer_queue is not None:
+                self.buffer_queue.put("end")
+            self.save_thread = None
+            self.buffer_queue = None
+        self.fps = 0
+        self.record_time_mode = False
+        self.record_frame_mode = False
+        self.continuous_mode = False
+        self.record_time = 0
+        self.total_frames = 0
+        self.record_start_time = 0
+        self.record_frame_count = 0
+        self.progress_bar_value = 0
+        
+        self.output_buffer.put({"order":"record_end","data":''})
+        self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['stop_save_video_success']})
+    
