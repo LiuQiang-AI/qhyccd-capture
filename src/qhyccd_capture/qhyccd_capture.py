@@ -20,7 +20,6 @@ import multiprocessing
 from multiprocessing import shared_memory
 from datetime import datetime, timedelta
 import pytz
-from websocket import continuous_frame
 
 # Import custom modules
 from .save_video import SaveThread
