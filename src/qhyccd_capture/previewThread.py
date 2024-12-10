@@ -7,7 +7,7 @@ import queue
 import time
 from multiprocessing import Array
 from threading import Lock
-import warnings
+import psutil
 from .sharedMemoryManager import SharedMemoryManager
 from .language import translations
 from .save_video import SaveThread
@@ -36,6 +36,7 @@ class PreviewThread(threading.Thread):
         self.save_thread = None
         self.buffer_queue = None
         self.save_thread_running = False
+        self.memory_state = True
         self.fps = 0
         self.record_time_mode = False
         self.record_frame_mode = False
@@ -59,8 +60,15 @@ class PreviewThread(threading.Thread):
                             self.fps = len(self.frame_times) / (self.frame_times[-1] - self.frame_times[0] + 0.0001)
                         else:
                             self.fps = 0.0001
+                            
+                        memory_info = psutil.virtual_memory()
+                        used_memory = memory_info.percent  # 已用内存
+                        if int(used_memory) < 80:
+                            self.memory_state = True
+                        else:
+                            self.memory_state = False
                         
-                        if self.save_thread is not None and self.save_thread_running and self.buffer_queue is not None:
+                        if self.save_thread is not None and self.save_thread_running and self.buffer_queue is not None and self.memory_state:
                             self.buffer_queue.put(img)
                             if self.record_time_mode:
                                 if self.record_start_time == 0:
