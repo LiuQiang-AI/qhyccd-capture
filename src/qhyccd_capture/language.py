@@ -462,6 +462,7 @@ translations = {
             'record_frame_mode_success': 'Frame Mode Recording Success',
             'start_save_video_success': 'Start Save Video Success',
             'stop_save_video_success': 'Stop Save Video Success',
+            'memory_warning': 'Memory Warning: Memory is insufficient, there may be frame loss',
         },
         'externalTriggerThread': {
             'exp_qhyccd_single_frame_failed': 'Exp QHYCCD Single Frame Failed',
@@ -1034,6 +1035,7 @@ translations = {
             'record_frame_mode_success': '帧数模式录制成功',
             'start_save_video_success': '开始录制视频',
             'stop_save_video_success': '停止录制视频',
+            'memory_warning': '内存警告：内存不足，会出现丢帧现象',
         },
         'externalTriggerThread': {
             'exp_qhyccd_single_frame_failed': '单帧曝光失败',

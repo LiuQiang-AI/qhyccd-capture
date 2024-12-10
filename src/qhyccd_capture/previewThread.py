@@ -37,6 +37,7 @@ class PreviewThread(threading.Thread):
         self.buffer_queue = None
         self.save_thread_running = False
         self.memory_state = True
+        self.memory_warning = False
         self.fps = 0
         self.record_time_mode = False
         self.record_frame_mode = False
@@ -67,7 +68,10 @@ class PreviewThread(threading.Thread):
                             self.memory_state = True
                         else:
                             self.memory_state = False
-                        
+                            
+                        if not self.memory_state and self.save_thread is not None and self.save_thread_running and self.buffer_queue is not None and not self.memory_warning:
+                            self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['memory_warning']})
+                            self.memory_warning = True
                         if self.save_thread is not None and self.save_thread_running and self.buffer_queue is not None and self.memory_state:
                             self.buffer_queue.put(img)
                             if self.record_time_mode:
@@ -285,7 +289,7 @@ class PreviewThread(threading.Thread):
         self.record_start_time = 0
         self.record_frame_count = 0
         self.progress_bar_value = 0
-        
+        self.memory_warning = False
         self.output_buffer.put({"order":"record_end","data":''})
         self.output_buffer.put({"order":"tip","data":translations[self.language]['preview_thread']['stop_save_video_success']})
     
