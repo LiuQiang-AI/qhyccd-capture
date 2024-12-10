@@ -1,11 +1,8 @@
 MANIFEST.in
 README.md
 README_CN.md
-camera_info.json
-luts.pkl
 pyproject.toml
 requirements.txt
-settings.json
 tox.ini
 .vscode/settings.json
 src/qhyccd_capture/__init__.py
